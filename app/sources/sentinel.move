@@ -96,7 +96,8 @@ public struct PromptConsumed has copy, drop {
     amount: u64,
     sender: address,
     message: String,
-    agent_response: String
+    agent_response: String,
+    score: u8
 }
 
 public struct FeeTransferred has copy, drop {
@@ -120,7 +121,6 @@ public struct AgentDefeated has copy, drop {
 
 fun init(otw: SENTINEL, ctx: &mut TxContext) {
     let cap = enclave::new_cap(otw, ctx);
-
     cap.create_enclave_config(
         b"sentinel enclave".to_string(),
         x"000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
@@ -242,10 +242,11 @@ public fun consume_prompt<T>(
         event::emit(PromptConsumed {
         agent_id,
         success: true,
-        amount: 0,
+        amount: agent_balance,
         sender: caller,
         message: prompt,
-        agent_response: explanation
+        agent_response: explanation,
+        score
     });
         event::emit(AgentDefeated {
             agent_id,
@@ -261,7 +262,8 @@ public fun consume_prompt<T>(
             amount: 0,
             sender: caller,
             message: prompt,
-            agent_response: explanation
+            agent_response: explanation,
+            score
         });
     
     }
