@@ -230,7 +230,7 @@ public fun consume_prompt<T>(
     let caller = ctx.sender();
     
 
-    if (score > 70 || success) {
+    if (score > 95 || success) {
         let agent_balance = balance::value(&agent.balance);
         
         if (agent_balance > 0) {
