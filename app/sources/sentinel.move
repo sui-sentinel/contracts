@@ -30,7 +30,12 @@ const ELowScore: u64 = 5;
 const ENotAuthorized: u64 = 6;
 const EAttackUsed: u64 = 7;
 const EAttackAgentMismatch: u64 = 8;
+const EInvalidFeeRatio: u64 = 9;
 
+const DEFAULT_AGENT_BALANCE_FEE: u64 = 5000;  // 50%
+const DEFAULT_CREATOR_FEE: u64 = 4000;         // 40%
+const DEFAULT_PROTOCOL_FEE: u64 = 1000;        // 10%
+const BASIS_POINTS: u64 = 10000;                // 100%
 
 
 public struct Agent has key, store {
@@ -41,7 +46,6 @@ public struct Agent has key, store {
     system_prompt: String,
     balance: Balance<SUI>
 }
-
 
 public struct AgentInfo has copy, drop {
     agent_id: String,
@@ -58,15 +62,21 @@ public struct AgentRegistry has key {
     agent_list: vector<String>,
 }
 
+public struct ProtocolConfig has key {
+    id: UID,
+    protocol_wallet: address,
+    agent_balance_fee: u64,
+    creator_fee: u64,       
+    protocol_fee: u64,
+    admin: address,
+}
 
 public struct SENTINEL has drop {}
-
 
 public struct AgentCap has key, store {
     id: UID,
     agent_id: String,
 }
-
 
 public struct RegisterAgentResponse has copy, drop {
     agent_id: String,
@@ -74,7 +84,6 @@ public struct RegisterAgentResponse has copy, drop {
     system_prompt: String,
     is_defeated: bool
 }
-
 
 public struct ConsumePromptResponse has copy, drop {
     agent_id: String,
@@ -84,7 +93,6 @@ public struct ConsumePromptResponse has copy, drop {
     attacker: address,
     nonce: u64
 }
-
 
 public struct AgentRegistered has copy, drop {
     agent_id: String,
@@ -108,7 +116,10 @@ public struct PromptConsumed has copy, drop {
 public struct FeeTransferred has copy, drop {
     agent_id: String,
     creator: address,
-    amount: u64,
+    amount_to_agent: u64,
+    amount_to_creator: u64,
+    amount_to_protocol: u64,
+    total_amount: u64,
 }
 
 public struct AgentFunded has copy, drop {
@@ -123,8 +134,20 @@ public struct AgentDefeated has copy, drop {
     amount_won: u64,
 }
 
-/// Issued after fee payment to prove a valid attack attempt.
-/// Attacker must present it when consuming a prompt.
+public struct FeeRatiosUpdated has copy, drop {
+    agent_balance_fee: u64,
+    creator_fee: u64,
+    protocol_fee: u64,
+    updated_by: address,
+}
+
+public struct ProtocolWalletUpdated has copy, drop {
+    old_wallet: address,
+    new_wallet: address,
+    updated_by: address,
+}
+
+
 public struct Attack has key, store {
     id: UID,
     agent_id: String,
@@ -154,11 +177,22 @@ fun init(otw: SENTINEL, ctx: &mut TxContext) {
         agent_list: vector::empty<String>(),
     };
     transfer::share_object(registry);
+
+    let protocol_config = ProtocolConfig {
+        id: object::new(ctx),
+        protocol_wallet: ctx.sender(), // Initially set to deployer
+        agent_balance_fee: DEFAULT_AGENT_BALANCE_FEE,
+        creator_fee: DEFAULT_CREATOR_FEE,
+        protocol_fee: DEFAULT_PROTOCOL_FEE,
+        admin: ctx.sender(),
+    };
+    transfer::share_object(protocol_config);
 }
 
 public fun request_attack(
     registry: &AgentRegistry,
     agent: &mut Agent,
+    config: &ProtocolConfig,
     agent_id: String,
     payment: Coin<SUI>,
     ctx: &mut TxContext
@@ -170,14 +204,45 @@ public fun request_attack(
     assert!(agent.agent_id == agent_id, EAgentNotFound);
 
     // Check and transfer fee
-    let amount = coin::value(&payment);
-    assert!(amount >= agent.cost_per_message, EInvalidAmount);
-    let fee_balance = coin::into_balance(payment);
-    //TODO: Distribute this fee later in three parts: agent balance(prize pool), agent creator, Protocol wallet
-    balance::join(&mut agent.balance, fee_balance);
+    let total_amount = coin::value(&payment);
+    assert!(total_amount >= agent.cost_per_message, EInvalidAmount);
+    
+    // Calculate fee distribution
+    let amount_to_agent = (total_amount * config.agent_balance_fee) / BASIS_POINTS;
+    let amount_to_creator = (total_amount * config.creator_fee) / BASIS_POINTS;
+    let amount_to_protocol = (total_amount * config.protocol_fee) / BASIS_POINTS;
+    
+    // Handle rounding - any remainder goes to agent balance
+    let distributed = amount_to_agent + amount_to_creator + amount_to_protocol;
+    let remainder = total_amount - distributed;
+    let amount_to_agent = amount_to_agent + remainder;
 
-    // Generate nonce using TxContext id for uniqueness
-    let nonce = tx_context::epoch(ctx); // or any deterministic value like object::id hash
+    // Split the payment
+    let mut payment_balance = coin::into_balance(payment);
+    
+    // Transfer to agent balance (prize pool)
+    let agent_balance = balance::split(&mut payment_balance, amount_to_agent);
+    balance::join(&mut agent.balance, agent_balance);
+    
+    // Transfer to creator
+    if (amount_to_creator > 0) {
+        let creator_balance = balance::split(&mut payment_balance, amount_to_creator);
+        let creator_coin = coin::from_balance(creator_balance, ctx);
+        transfer::public_transfer(creator_coin, agent.creator);
+    };
+    
+    // Transfer to protocol wallet
+    if (amount_to_protocol > 0) {
+        let protocol_balance = balance::split(&mut payment_balance, amount_to_protocol);
+        let protocol_coin = coin::from_balance(protocol_balance, ctx);
+        transfer::public_transfer(protocol_coin, config.protocol_wallet);
+    };
+
+    // Destroy any remaining dust (should be empty)
+    balance::destroy_zero(payment_balance);
+
+    // Generate nonce using TxContext epoch for uniqueness
+    let nonce = tx_context::epoch(ctx);
     let attacker = ctx.sender();
 
     // Create attack
@@ -185,7 +250,7 @@ public fun request_attack(
         id: object::new(ctx),
         agent_id,
         attacker,
-        paid_amount: amount,
+        paid_amount: total_amount,
         nonce,
         used: false,
     };
@@ -193,11 +258,12 @@ public fun request_attack(
     event::emit(FeeTransferred {
         agent_id: agent.agent_id,
         creator: agent.creator,
-        amount,
+        amount_to_agent,
+        amount_to_creator,
+        amount_to_protocol,
+        total_amount,
     });
 
-    // Send challenge to requester
-    // transfer::transfer(attack, attacker);
     attack
 }
 
@@ -339,7 +405,75 @@ public fun consume_prompt<T>(
         });
     
     }
-    //TODO: Figure out if we should keep the challenge or delete the challenge
+}
+
+// ==================== Admin Functions ====================
+
+/// Update fee ratios (only admin)
+public fun update_fee_ratios(
+    config: &mut ProtocolConfig,
+    agent_balance_fee: u64,
+    creator_fee: u64,
+    protocol_fee: u64,
+    ctx: &TxContext
+) {
+    assert!(ctx.sender() == config.admin, ENotAuthorized);
+    
+    // Validate that fees add up to 100%
+    assert!(
+        agent_balance_fee + creator_fee + protocol_fee == BASIS_POINTS,
+        EInvalidFeeRatio
+    );
+    
+    config.agent_balance_fee = agent_balance_fee;
+    config.creator_fee = creator_fee;
+    config.protocol_fee = protocol_fee;
+    
+    event::emit(FeeRatiosUpdated {
+        agent_balance_fee,
+        creator_fee,
+        protocol_fee,
+        updated_by: ctx.sender(),
+    });
+}
+
+/// Update protocol wallet address (only admin)
+public fun update_protocol_wallet(
+    config: &mut ProtocolConfig,
+    new_wallet: address,
+    ctx: &TxContext
+) {
+    assert!(ctx.sender() == config.admin, ENotAuthorized);
+    
+    let old_wallet = config.protocol_wallet;
+    config.protocol_wallet = new_wallet;
+    
+    event::emit(ProtocolWalletUpdated {
+        old_wallet,
+        new_wallet,
+        updated_by: ctx.sender(),
+    });
+}
+
+/// Transfer admin role (only current admin)
+public fun transfer_admin(
+    config: &mut ProtocolConfig,
+    new_admin: address,
+    ctx: &TxContext
+) {
+    assert!(ctx.sender() == config.admin, ENotAuthorized);
+    config.admin = new_admin;
+}
+
+// ==================== View Functions ====================
+
+public fun get_protocol_config(config: &ProtocolConfig): (address, u64, u64, u64) {
+    (
+        config.protocol_wallet,
+        config.agent_balance_fee,
+        config.creator_fee,
+        config.protocol_fee
+    )
 }
 
 public fun get_agent_info(agent: &Agent): AgentInfo {
