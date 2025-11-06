@@ -17,6 +17,7 @@ use std::string::utf8;
 use enclave::enclave::EnclaveConfig;
 use sui::config;
 use sui::nitro_attestation::load_nitro_attestation;
+use sui::clock::{Self, Clock};
 
 
 const SENTINEL_INTENT: u8 = 1;
@@ -31,11 +32,14 @@ const ENotAuthorized: u64 = 6;
 const EAttackUsed: u64 = 7;
 const EAttackAgentMismatch: u64 = 8;
 const EInvalidFeeRatio: u64 = 9;
+const EWithdrawalLocked: u64 = 10;
 
+// Fee percentage constants (in basis points, 100 = 1%)
 const DEFAULT_AGENT_BALANCE_FEE: u64 = 5000;  // 50%
 const DEFAULT_CREATOR_FEE: u64 = 4000;         // 40%
 const DEFAULT_PROTOCOL_FEE: u64 = 1000;        // 10%
-const BASIS_POINTS: u64 = 10000;                // 100%
+const BASIS_POINTS: u64 = 10000;   
+const WITHDRAWAL_LOCK_PERIOD_MS: u64 =1209600000;             // 14 days in milliseconds
 
 
 public struct Agent has key, store {
@@ -44,8 +48,10 @@ public struct Agent has key, store {
     creator: address,
     cost_per_message: u64,
     system_prompt: String,
-    balance: Balance<SUI>
+    balance: Balance<SUI>,
+    last_funded_timestamp: u64
 }
+
 
 public struct AgentInfo has copy, drop {
     agent_id: String,
@@ -62,21 +68,25 @@ public struct AgentRegistry has key {
     agent_list: vector<String>,
 }
 
+/// Config object to store protocol settings
 public struct ProtocolConfig has key {
     id: UID,
     protocol_wallet: address,
-    agent_balance_fee: u64,
-    creator_fee: u64,       
-    protocol_fee: u64,
+    agent_balance_fee: u64,  // in basis points
+    creator_fee: u64,         // in basis points
+    protocol_fee: u64,        // in basis points
     admin: address,
 }
 
+
 public struct SENTINEL has drop {}
+
 
 public struct AgentCap has key, store {
     id: UID,
     agent_id: String,
 }
+
 
 public struct RegisterAgentResponse has copy, drop {
     agent_id: String,
@@ -84,6 +94,7 @@ public struct RegisterAgentResponse has copy, drop {
     system_prompt: String,
     is_defeated: bool
 }
+
 
 public struct ConsumePromptResponse has copy, drop {
     agent_id: String,
@@ -93,6 +104,7 @@ public struct ConsumePromptResponse has copy, drop {
     attacker: address,
     nonce: u64
 }
+
 
 public struct AgentRegistered has copy, drop {
     agent_id: String,
@@ -125,6 +137,8 @@ public struct FeeTransferred has copy, drop {
 public struct AgentFunded has copy, drop {
     agent_id: String,
     amount: u64,
+    funded_timestamp: u64,
+    unlock_timestamp: u64,
 }
 
 public struct AgentDefeated has copy, drop {
@@ -147,7 +161,15 @@ public struct ProtocolWalletUpdated has copy, drop {
     updated_by: address,
 }
 
+public struct FundsWithdrawn has copy, drop {
+    agent_id: String,
+    creator: address,
+    amount: u64,
+    withdrawn_at: u64,
+}
 
+/// Issued after fee payment to prove a valid attack attempt.
+/// Attacker must present it when consuming a prompt.
 public struct Attack has key, store {
     id: UID,
     agent_id: String,
@@ -178,6 +200,7 @@ fun init(otw: SENTINEL, ctx: &mut TxContext) {
     };
     transfer::share_object(registry);
 
+    // Initialize protocol config
     let protocol_config = ProtocolConfig {
         id: object::new(ctx),
         protocol_wallet: ctx.sender(), // Initially set to deployer
@@ -290,7 +313,8 @@ public fun register_agent<T>(
         creator,
         cost_per_message,
         system_prompt,
-        balance: balance::zero(), 
+        balance: balance::zero(),
+        last_funded_timestamp: 0, // Initialize to 0
     };
     
     let agent_object_id = object::id(&agent);
@@ -311,14 +335,22 @@ public fun register_agent<T>(
 
 
 
-public fun fund_agent(agent: &mut Agent, payment: Coin<SUI>, ctx: &TxContext) {
+public fun fund_agent(agent: &mut Agent, payment: Coin<SUI>, clock: &Clock, ctx: &TxContext) {
     let amount = coin::value(&payment);
     let balance_to_add = coin::into_balance(payment);
     balance::join(&mut agent.balance, balance_to_add);
     
+    // Update last funded timestamp
+    let current_time = clock::timestamp_ms(clock);
+    agent.last_funded_timestamp = current_time;
+    
+    let unlock_timestamp = current_time + WITHDRAWAL_LOCK_PERIOD_MS;
+    
     event::emit(AgentFunded {
         agent_id: agent.agent_id,
         amount,
+        funded_timestamp: current_time,
+        unlock_timestamp,
     });
 }
 
@@ -532,12 +564,64 @@ public fun update_agent_prompt(agent: &mut Agent, new_prompt: String, ctx: &TxCo
     agent.system_prompt = new_prompt;
 }
 
-/// Withdraw funds from agent (only by creator, and only if agent is not defeated)
-public fun withdraw_from_agent(agent: &mut Agent, amount: u64, ctx: &mut TxContext): Coin<SUI> {
+/// Check if withdrawal is currently unlocked
+public fun is_withdrawal_unlocked(agent: &Agent, clock: &sui::clock::Clock): bool {
+    if (agent.last_funded_timestamp == 0) {
+        return true // Never funded, can withdraw
+    };
+    let current_time = clock::timestamp_ms(clock);
+    let time_since_last_funding = current_time - agent.last_funded_timestamp;
+    time_since_last_funding >= WITHDRAWAL_LOCK_PERIOD_MS
+}
+
+/// Get timestamp when withdrawal will be unlocked
+public fun get_withdrawal_unlock_timestamp(agent: &Agent): u64 {
+    if (agent.last_funded_timestamp == 0) {
+        return 0 // Never funded
+    };
+    agent.last_funded_timestamp + WITHDRAWAL_LOCK_PERIOD_MS
+}
+
+/// Get time remaining until withdrawal unlock (in milliseconds)
+public fun get_withdrawal_time_remaining(agent: &Agent, clock: &Clock): u64 {
+    if (agent.last_funded_timestamp == 0) {
+        return 0 // Never funded, no lock
+    };
+    let current_time = clock::timestamp_ms(clock);
+    let unlock_time = agent.last_funded_timestamp + WITHDRAWAL_LOCK_PERIOD_MS;
+    if (current_time >= unlock_time) {
+        return 0 // Already unlocked
+    };
+    unlock_time - current_time
+}
+
+/// Withdraw funds from agent (only by creator, enforces 14-day lock from last funding)
+public fun withdraw_from_agent(
+    agent: &mut Agent, 
+    amount: u64, 
+    clock: &Clock,
+    ctx: &mut TxContext
+): Coin<SUI> {
     assert!(agent.creator == ctx.sender(), ENotAuthorized);
     assert!(balance::value(&agent.balance) >= amount, EInsufficientBalance);
     
+    // Check if 14 days have passed since last funding
+    let current_time = clock::timestamp_ms(clock);
+    let time_since_last_funding = current_time - agent.last_funded_timestamp;
+    assert!(
+        time_since_last_funding >= WITHDRAWAL_LOCK_PERIOD_MS,
+        EWithdrawalLocked
+    );
+    
     let withdrawn_balance = balance::split(&mut agent.balance, amount);
+    
+    event::emit(FundsWithdrawn {
+        agent_id: agent.agent_id,
+        creator: agent.creator,
+        amount,
+        withdrawn_at: current_time,
+    });
+    
     coin::from_balance(withdrawn_balance, ctx)
 }
 
@@ -550,7 +634,7 @@ fun test_register_agent_flow() {
     use enclave::enclave::{register_enclave, create_enclave_config, update_pcrs, EnclaveConfig};
 
     let mut scenario = test_scenario::begin( @0x4668aa5963dacfe3e169be3cf824395ab9de3f0a544fc2ca638858a536b5ff4b);
-    let mut clock = sui::clock::create_for_testing(ctx(&mut scenario));
+    let mut clock = clock::create_for_testing(ctx(&mut scenario));
     clock.set_for_testing(1752827854000);
 
     let cap = enclave::new_cap(SENTINEL {}, ctx(&mut scenario));

@@ -6,6 +6,19 @@ Sui Sentinel is fun-economic gameplay between defenders and attackers. It's a hi
 
 **Attackers**: Users who try to socially engineer, "jailbreak," or persuade a Defender's Sentinel into surrendering its funds through clever conversation and prompting.
 
+# Local Development
+
+```bash
+sui move build
+```
+
+```bash
+sui move test
+```
+
+```bash
+sui client publish
+```
 
 Step 1 – Pay fee on-chain
 User calls request_challenge(agent_id) and pays the fee.
