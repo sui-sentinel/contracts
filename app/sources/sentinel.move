@@ -28,6 +28,9 @@ const EInsufficientBalance: u64 = 3;
 const EInvalidAmount: u64 = 4;
 const ELowScore: u64 = 5;
 const ENotAuthorized: u64 = 6;
+const EAttackUsed: u64 = 7;
+const EAttackAgentMismatch: u64 = 8;
+
 
 
 public struct Agent has key, store {
@@ -77,7 +80,9 @@ public struct ConsumePromptResponse has copy, drop {
     agent_id: String,
     success: bool,
     explanation: String,
-    score: u8
+    score: u8,
+    attacker: address,
+    nonce: u64
 }
 
 
@@ -118,6 +123,18 @@ public struct AgentDefeated has copy, drop {
     amount_won: u64,
 }
 
+/// Issued after fee payment to prove a valid attack attempt.
+/// Attacker must present it when consuming a prompt.
+public struct Attack has key, store {
+    id: UID,
+    agent_id: String,
+    attacker: address,
+    paid_amount: u64,
+    nonce: u64,
+    used: bool,
+}
+
+
 
 fun init(otw: SENTINEL, ctx: &mut TxContext) {
     let cap = enclave::new_cap(otw, ctx);
@@ -138,6 +155,52 @@ fun init(otw: SENTINEL, ctx: &mut TxContext) {
     };
     transfer::share_object(registry);
 }
+
+public fun request_attack(
+    registry: &AgentRegistry,
+    agent: &mut Agent,
+    agent_id: String,
+    payment: Coin<SUI>,
+    ctx: &mut TxContext
+): Attack {
+    // Validate agent
+    assert!(table::contains(&registry.agents, agent_id), EAgentNotFound);
+    let registered_agent_id = *table::borrow(&registry.agents, agent_id);
+    assert!(object::id(agent) == registered_agent_id, EAgentNotFound);
+    assert!(agent.agent_id == agent_id, EAgentNotFound);
+
+    // Check and transfer fee
+    let amount = coin::value(&payment);
+    assert!(amount >= agent.cost_per_message, EInvalidAmount);
+    let fee_balance = coin::into_balance(payment);
+    //TODO: Distribute this fee later in three parts: agent balance(prize pool), agent creator, Protocol wallet
+    balance::join(&mut agent.balance, fee_balance);
+
+    // Generate nonce using TxContext id for uniqueness
+    let nonce = tx_context::epoch(ctx); // or any deterministic value like object::id hash
+    let attacker = ctx.sender();
+
+    // Create attack
+    let attack = Attack {
+        id: object::new(ctx),
+        agent_id,
+        attacker,
+        paid_amount: amount,
+        nonce,
+        used: false,
+    };
+
+    event::emit(FeeTransferred {
+        agent_id: agent.agent_id,
+        creator: agent.creator,
+        amount,
+    });
+
+    // Send challenge to requester
+    // transfer::transfer(attack, attacker);
+    attack
+}
+
 
 
 #[allow(lint(self_transfer))]
@@ -180,6 +243,8 @@ public fun register_agent<T>(
     transfer::share_object(agent);
 }
 
+
+
 public fun fund_agent(agent: &mut Agent, payment: Coin<SUI>, ctx: &TxContext) {
     let amount = coin::value(&payment);
     let balance_to_add = coin::into_balance(payment);
@@ -202,8 +267,12 @@ public fun consume_prompt<T>(
     timestamp_ms: u64,
     sig: &vector<u8>,
     enclave: &Enclave<T>,
+    attack: &mut Attack,
     ctx: &mut TxContext,
 ) {
+    assert!(!attack.used, EAttackUsed);
+    assert!(agent.agent_id == attack.agent_id, EAttackAgentMismatch);
+    assert!(ctx.sender() == attack.attacker, ENotAuthorized);
 
     assert!(table::contains(&registry.agents, agent_id), EAgentNotFound);
     let registered_agent_id = *table::borrow(&registry.agents, agent_id);
@@ -215,7 +284,9 @@ public fun consume_prompt<T>(
         agent_id,
         success,
         explanation,
-        score
+        score,
+        attacker: ctx.sender(),
+        nonce: attack.nonce
     };
     
     let verification_result = enclave::verify_signature<T, ConsumePromptResponse>(
@@ -228,6 +299,7 @@ public fun consume_prompt<T>(
     assert!(verification_result, EInvalidSignature);
     
     let caller = ctx.sender();
+    attack.used = true;
     
 
     if (score > 95 || success) {
@@ -267,6 +339,7 @@ public fun consume_prompt<T>(
         });
     
     }
+    //TODO: Figure out if we should keep the challenge or delete the challenge
 }
 
 public fun get_agent_info(agent: &Agent): AgentInfo {
