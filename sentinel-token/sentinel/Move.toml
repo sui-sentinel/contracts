@@ -1,0 +1,18 @@
+[package]
+name = "sentinel"
+edition = "2024.beta"                               # edition = "legacy" to use legacy (pre-2024) Move
+license = "MIT"
+authors = ["Satyam Bansal <satyambnsal@gmail.com>"]
+
+
+[dependencies]
+
+Sui = { git = "https://github.com/MystenLabs/sui.git", rev = "framework/testnet", subdir = "crates/sui-framework/packages/sui-framework" }
+
+
+[addresses]
+sentinel = "0x0"
+
+[dev-dependencies]
+
+[dev-addresses]
