@@ -73,7 +73,7 @@ public struct AgentInfo has copy, drop {
 public struct AgentRegistry has key {
     id: UID,
     agents: Table<String, ID>,
-    agent_list: vector<String>,
+    agent_count: u64
 }
 
 /// Config object to store protocol settings
@@ -206,7 +206,7 @@ fun init(otw: SENTINEL, ctx: &mut TxContext) {
     let registry = AgentRegistry {
         id: object::new(ctx),
         agents: table::new(ctx),
-        agent_list: vector::empty<String>(),
+        agent_count: 0
     };
     transfer::share_object(registry);
 
@@ -330,8 +330,7 @@ public fun register_agent<T>(
     
     let agent_object_id = object::id(&agent);
     table::add(&mut registry.agents, agent_id, agent_object_id);
-    
-    vector::push_back(&mut registry.agent_list, agent_id);
+    registry.agent_count = registry.agent_count + 1;
     
     event::emit(AgentRegistered {
         agent_id,
@@ -420,9 +419,11 @@ public fun consume_prompt<T>(
     object::delete(attack_object_id);
 
     let caller = ctx.sender();
+    let mut reward_amount = 0;
     if (success) {
         let agent_balance = balance::value(&agent.balance);
         if (agent_balance > 0) {
+            reward_amount = agent_balance;
             let reward_coin = coin::from_balance(balance::withdraw_all(&mut agent.balance), ctx);
             transfer::public_transfer(reward_coin, caller);
             
@@ -438,7 +439,7 @@ public fun consume_prompt<T>(
     event::emit(PromptConsumed {
         agent_id: agent.agent_id,
         success,
-        amount: if (success) balance::value(&agent.balance) else 0,
+        amount: reward_amount,
         sender: caller,
         message: prompt,
         agent_response: explanation,
@@ -526,13 +527,11 @@ public fun get_agent_info(agent: &Agent): AgentInfo {
     }
 }
 
-public fun get_all_agent_ids(registry: &AgentRegistry): vector<String> {
-    registry.agent_list
-}
+
 
 
 public fun get_agent_count(registry: &AgentRegistry): u64 {
-    vector::length(&registry.agent_list)
+    registry.agent_count
 }
 
 /// Check if an agent exists in the registry
@@ -676,7 +675,7 @@ fun test_register_agent_flow() {
                 let mut registry = AgentRegistry {
         id: object::new(ctx(&mut scenario)),
         agents: table::new(ctx(&mut scenario)),
-        agent_list: vector::empty<String>(),
+        agent_count: 0
     };
 
             let agent_id = string::utf8(b"29");
