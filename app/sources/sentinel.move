@@ -3,7 +3,7 @@
 module app::sentinel;
 
 use enclave::enclave::{Self, Enclave};
-use std::string::{Self, String, into_bytes};
+use std::string::{Self, String};
 use sui::coin::{Self, Coin};
 use sui::sui::SUI;
 use sui::balance::{Self, Balance};
@@ -17,6 +17,11 @@ use sui::config;
 use sui::nitro_attestation::load_nitro_attestation;
 use sui::clock::{Self, Clock};
 use sui::hash;
+use std::bcs;
+use std::debug;
+use std::address;
+use sui::address::from_bytes;
+
 
 
 const SENTINEL_INTENT: u8 = 1;
@@ -103,7 +108,7 @@ public struct ConsumePromptResponse has copy, drop {
     score: u8,
     attacker: address,
     nonce: u64,
-    message_hash: vector<u8>
+    message_hash: address
 }
 
 
@@ -264,7 +269,6 @@ public fun request_attack(
 
     // Destroy any remaining dust (should be empty)
     balance::destroy_zero(payment_balance);
-
     // Generate nonce using TxContext epoch for uniqueness
     let nonce = tx_context::epoch(ctx);
     let attacker = ctx.sender();
@@ -377,8 +381,8 @@ public fun consume_prompt<T>(
     let registered_agent_id = *table::borrow(&registry.agents, agent_id);
     assert!(object::id(agent) == registered_agent_id, EAgentNotFound);
     assert!(agent.agent_id == agent_id, EAgentNotFound);
-    let message_bytes = into_bytes(prompt);
-    let message_hash   = hash::blake2b256(&message_bytes);
+    let message_bytes = bcs::to_bytes(&prompt);
+    let message_hash   = from_bytes(hash::blake2b256(&message_bytes));
 
     let response = ConsumePromptResponse {
         agent_id,
