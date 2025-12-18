@@ -1,7 +1,7 @@
 module sentinel::sentinel;
 
 
-const DECIMALS: u8 = 1;
+const DECIMALS: u8 = 0;
 const NAME: vector<u8> = b"Sentinel";
 const SYMBOL: vector<u8> = b"SENTINEL";
 const DESCRIPTION: vector<u8> =
