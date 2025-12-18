@@ -37,6 +37,8 @@ const EAttackUsed: u64 = 7;
 const EAttackAgentMismatch: u64 = 8;
 const EInvalidFeeRatio: u64 = 9;
 const EWithdrawalLocked: u64 = 10;
+const EPromptUpdateLocked: u64 = 11;
+const ETextTooLong: u64 = 12;
 
 // Fee percentage constants (in basis points, 100 = 1%)
 const DEFAULT_AGENT_BALANCE_FEE: u64 = 5000;  // 50%
@@ -44,7 +46,8 @@ const DEFAULT_CREATOR_FEE: u64 = 4000;         // 40%
 const DEFAULT_PROTOCOL_FEE: u64 = 1000;        // 10%
 const BASIS_POINTS: u64 = 10000;   
 const WITHDRAWAL_LOCK_PERIOD_MS: u64 =1209600000;             // 14 days in milliseconds
-
+const PROMPT_UPDATE_WINDOW_MS: u64 = 10800000; // 3 hours in milliseconds
+const MAX_TEXT_LENGTH: u64 = 64000; // ~64KB, intentionally setting large for complex AI instructions
 
 public struct Agent has key, store {
     id: UID,
@@ -53,7 +56,8 @@ public struct Agent has key, store {
     cost_per_message: u64,
     system_prompt: String,
     balance: Balance<SUI>,
-    last_funded_timestamp: u64
+    last_funded_timestamp: u64,
+    created_at: u64
 }
 
 
@@ -222,15 +226,13 @@ public fun request_attack(
     registry: &AgentRegistry,
     agent: &mut Agent,
     config: &ProtocolConfig,
-    agent_id: String,
     payment: Coin<SUI>,
     ctx: &mut TxContext
 ): Attack {
     // Validate agent
-    assert!(table::contains(&registry.agents, agent_id), EAgentNotFound);
-    let registered_agent_id = *table::borrow(&registry.agents, agent_id);
-    assert!(object::id(agent) == registered_agent_id, EAgentNotFound);
-    assert!(agent.agent_id == agent_id, EAgentNotFound);
+    assert!(table::contains(&registry.agents, agent.agent_id), EAgentNotFound);
+    let registered_id = *table::borrow(&registry.agents, agent.agent_id);
+    assert!(object::id(agent) == registered_id, EAgentNotFound);
 
     // Check and transfer fee
     let total_amount = coin::value(&payment);
@@ -276,7 +278,7 @@ public fun request_attack(
     // Create attack
     let attack = Attack {
         id: object::new(ctx),
-        agent_id,
+        agent_id: agent.agent_id,
         attacker,
         paid_amount: total_amount,
         nonce,
@@ -306,9 +308,12 @@ public fun register_agent<T>(
     system_prompt: String,
     sig: &vector<u8>,
     enclave: &Enclave<T>,
+    clock: &Clock,
     ctx: &mut TxContext,
 ) {
+    assert!(string::length(&system_prompt) <= MAX_TEXT_LENGTH, ETextTooLong);
     let creator = ctx.sender();
+    let current_time = clock::timestamp_ms(clock);
     
     let res = enclave::verify_signature<T, RegisterAgentResponse>(enclave, SENTINEL_INTENT, timestamp_ms, RegisterAgentResponse { agent_id, cost_per_message, system_prompt, is_defeated:false, creator }, sig);
     assert!(res, EInvalidSignature);
@@ -319,7 +324,8 @@ public fun register_agent<T>(
         cost_per_message,
         system_prompt,
         balance: balance::zero(),
-        last_funded_timestamp: 0, // Initialize to 0
+        last_funded_timestamp: 0,
+        created_at: current_time
     };
     
     let agent_object_id = object::id(&agent);
@@ -340,7 +346,8 @@ public fun register_agent<T>(
 
 
 
-public fun fund_agent(agent: &mut Agent, payment: Coin<SUI>, clock: &Clock, _ctx: &TxContext) {
+public fun fund_agent(agent: &mut Agent, payment: Coin<SUI>, clock: &Clock, ctx: &TxContext) {
+    assert!(agent.creator == ctx.sender(), ENotAuthorized);
     let amount = coin::value(&payment);
     let balance_to_add = coin::into_balance(payment);
     balance::join(&mut agent.balance, balance_to_add);
@@ -362,7 +369,6 @@ public fun fund_agent(agent: &mut Agent, payment: Coin<SUI>, clock: &Clock, _ctx
 public fun consume_prompt<T>(
     registry: &AgentRegistry,
     agent: &mut Agent,
-    agent_id: String,
     success: bool,
     explanation: String,
     prompt: String,
@@ -370,27 +376,35 @@ public fun consume_prompt<T>(
     timestamp_ms: u64,
     sig: &vector<u8>,
     enclave: &Enclave<T>,
-    attack: &mut Attack,
+    attack: Attack,
     ctx: &mut TxContext,
 ) {
-    assert!(!attack.used, EAttackUsed);
-    assert!(agent.agent_id == attack.agent_id, EAttackAgentMismatch);
-    assert!(ctx.sender() == attack.attacker, ENotAuthorized);
 
-    assert!(table::contains(&registry.agents, agent_id), EAgentNotFound);
-    let registered_agent_id = *table::borrow(&registry.agents, agent_id);
-    assert!(object::id(agent) == registered_agent_id, EAgentNotFound);
-    assert!(agent.agent_id == agent_id, EAgentNotFound);
+    let Attack {
+        id: attack_object_id,
+        agent_id: attack_agent_id,
+        attacker: attack_attacker,
+        paid_amount: _,
+        nonce: attack_nonce,
+        used: attack_used,
+    } = attack;
+
+    assert!(!attack_used, EAttackUsed);
+    assert!(table::contains(&registry.agents, agent.agent_id), EAgentNotFound);
+    assert!(agent.agent_id == attack_agent_id, EAttackAgentMismatch);
+    assert!(ctx.sender() == attack_attacker, ENotAuthorized);
+    assert!(string::length(&prompt) <= MAX_TEXT_LENGTH, ETextTooLong);
+
     let message_bytes = bcs::to_bytes(&prompt);
     let message_hash   = from_bytes(hash::blake2b256(&message_bytes));
 
     let response = ConsumePromptResponse {
-        agent_id,
+        agent_id: agent.agent_id,
         success,
         explanation,
         score,
         attacker: ctx.sender(),
-        nonce: attack.nonce,
+        nonce: attack_nonce,
         message_hash
     };
     
@@ -402,48 +416,34 @@ public fun consume_prompt<T>(
         sig
     );
     assert!(verification_result, EInvalidSignature);
-    
-    let caller = ctx.sender();
-    attack.used = true;
-    
 
+    object::delete(attack_object_id);
+
+    let caller = ctx.sender();
     if (success) {
         let agent_balance = balance::value(&agent.balance);
-        
         if (agent_balance > 0) {
-            let withdrawn_balance = balance::withdraw_all(&mut agent.balance);
-            let reward_coin = coin::from_balance(withdrawn_balance, ctx);
-            
-            // Transfer the reward directly to the caller
+            let reward_coin = coin::from_balance(balance::withdraw_all(&mut agent.balance), ctx);
             transfer::public_transfer(reward_coin, caller);
-        event::emit(PromptConsumed {
-        agent_id,
-        success: true,
-        amount: agent_balance,
+            
+            event::emit(AgentDefeated {
+                agent_id: agent.agent_id,
+                winner: caller,
+                score,
+                amount_won: agent_balance,
+            });
+        }
+    };
+
+    event::emit(PromptConsumed {
+        agent_id: agent.agent_id,
+        success,
+        amount: if (success) balance::value(&agent.balance) else 0,
         sender: caller,
         message: prompt,
         agent_response: explanation,
         score
     });
-        event::emit(AgentDefeated {
-            agent_id,
-            winner: caller,
-            score,
-            amount_won: agent_balance,
-        });
-        }
-    } else {
-        event::emit(PromptConsumed {
-            agent_id,
-            success: false,
-            amount: 0,
-            sender: caller,
-            message: prompt,
-            agent_response: explanation,
-            score
-        });
-    
-    }
 }
 
 // ==================== Admin Functions ====================
@@ -566,8 +566,15 @@ public fun update_agent_cost(agent: &mut Agent, new_cost: u64, ctx: &TxContext) 
 }
 
 /// Update agent system prompt (only by creator)
-public fun update_agent_prompt(agent: &mut Agent, new_prompt: String, ctx: &TxContext) {
+public fun update_agent_prompt(agent: &mut Agent, new_prompt: String, clock: &Clock, ctx: &TxContext) {
     assert!(agent.creator == ctx.sender(), ENotAuthorized);
+    assert!(string::length(&new_prompt) <= MAX_TEXT_LENGTH, ETextTooLong);
+
+    let current_time = clock::timestamp_ms(clock);
+    let time_elapsed = current_time - agent.created_at;
+    
+    // Check if we are still within the 3-hour window
+    assert!(time_elapsed <= PROMPT_UPDATE_WINDOW_MS, EPromptUpdateLocked);
     agent.system_prompt = new_prompt;
 }
 
@@ -611,24 +618,16 @@ public fun withdraw_from_agent(
 ): Coin<SUI> {
     assert!(agent.creator == ctx.sender(), ENotAuthorized);
     assert!(balance::value(&agent.balance) >= amount, EInsufficientBalance);
-    
-    // Check if 14 days have passed since last funding
+    assert!(is_withdrawal_unlocked(agent, clock), EWithdrawalLocked);
+
     let current_time = clock::timestamp_ms(clock);
-    let time_since_last_funding = current_time - agent.last_funded_timestamp;
-    assert!(
-        time_since_last_funding >= WITHDRAWAL_LOCK_PERIOD_MS,
-        EWithdrawalLocked
-    );
-    
     let withdrawn_balance = balance::split(&mut agent.balance, amount);
-    
     event::emit(FundsWithdrawn {
         agent_id: agent.agent_id,
         creator: agent.creator,
         amount,
         withdrawn_at: current_time,
     });
-    
     coin::from_balance(withdrawn_balance, ctx)
 }
 
@@ -687,12 +686,13 @@ fun test_register_agent_flow() {
             let sig = x"6e6a93cbcb556c636c69ab8d9091d6b187d163534fe97ecca8f6f672af67987fd004a3e5cf94befdfd58eda18c95a6bc72ed7c7214c508cc748a88b9bf80b205";
             register_agent(
                 &mut registry, 
-            agent_id,
+                agent_id,
             timestamp_ms,
              cost_per_message,
               system_prompt,
                &sig,
                 &enclave,
+                &clock,
                  ctx(&mut scenario));
             test_scenario::return_shared(config);
             clock.destroy_for_testing();
