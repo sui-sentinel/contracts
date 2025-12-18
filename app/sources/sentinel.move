@@ -3,21 +3,20 @@
 module app::sentinel;
 
 use enclave::enclave::{Self, Enclave};
-use std::string::{Self, String};
+use std::string::{Self, String, into_bytes};
 use sui::coin::{Self, Coin};
 use sui::sui::SUI;
 use sui::balance::{Self, Balance};
 use sui::table::{Self, Table};
 use sui::vec_map::{Self, VecMap};
 use sui::event;
-use sui::transfer;
-use sui::object::{Self, UID, ID};
 use std::bool;
 use std::string::utf8;
 use enclave::enclave::EnclaveConfig;
 use sui::config;
 use sui::nitro_attestation::load_nitro_attestation;
 use sui::clock::{Self, Clock};
+use sui::hash;
 
 
 const SENTINEL_INTENT: u8 = 1;
@@ -92,7 +91,8 @@ public struct RegisterAgentResponse has copy, drop {
     agent_id: String,
     cost_per_message: u64,
     system_prompt: String,
-    is_defeated: bool
+    is_defeated: bool,
+    creator: address
 }
 
 
@@ -102,7 +102,8 @@ public struct ConsumePromptResponse has copy, drop {
     explanation: String,
     score: u8,
     attacker: address,
-    nonce: u64
+    nonce: u64,
+    message_hash: vector<u8>
 }
 
 
@@ -305,7 +306,7 @@ public fun register_agent<T>(
 ) {
     let creator = ctx.sender();
     
-    let res = enclave::verify_signature<T, RegisterAgentResponse>(enclave, SENTINEL_INTENT, timestamp_ms, RegisterAgentResponse { agent_id, cost_per_message, system_prompt, is_defeated:false }, sig);
+    let res = enclave::verify_signature<T, RegisterAgentResponse>(enclave, SENTINEL_INTENT, timestamp_ms, RegisterAgentResponse { agent_id, cost_per_message, system_prompt, is_defeated:false, creator }, sig);
     assert!(res, EInvalidSignature);
     let agent = Agent {
         id: object::new(ctx),
@@ -335,7 +336,7 @@ public fun register_agent<T>(
 
 
 
-public fun fund_agent(agent: &mut Agent, payment: Coin<SUI>, clock: &Clock, ctx: &TxContext) {
+public fun fund_agent(agent: &mut Agent, payment: Coin<SUI>, clock: &Clock, _ctx: &TxContext) {
     let amount = coin::value(&payment);
     let balance_to_add = coin::into_balance(payment);
     balance::join(&mut agent.balance, balance_to_add);
@@ -376,7 +377,8 @@ public fun consume_prompt<T>(
     let registered_agent_id = *table::borrow(&registry.agents, agent_id);
     assert!(object::id(agent) == registered_agent_id, EAgentNotFound);
     assert!(agent.agent_id == agent_id, EAgentNotFound);
-    
+    let message_bytes = into_bytes(prompt);
+    let message_hash   = hash::blake2b256(&message_bytes);
 
     let response = ConsumePromptResponse {
         agent_id,
@@ -384,7 +386,8 @@ public fun consume_prompt<T>(
         explanation,
         score,
         attacker: ctx.sender(),
-        nonce: attack.nonce
+        nonce: attack.nonce,
+        message_hash
     };
     
     let verification_result = enclave::verify_signature<T, ConsumePromptResponse>(
@@ -400,7 +403,7 @@ public fun consume_prompt<T>(
     attack.used = true;
     
 
-    if (score > 95 || success) {
+    if (success) {
         let agent_balance = balance::value(&agent.balance);
         
         if (agent_balance > 0) {
