@@ -6,11 +6,14 @@ use sui::ed25519;
 use sui::nitro_attestation::NitroAttestationDocument;
 
 use fun to_pcrs as NitroAttestationDocument.to_pcrs;
+use sui::clock::{Clock, Self};
 
 const EInvalidPCRs: u64 = 0;
 const EInvalidConfigVersion: u64 = 1;
 const EInvalidCap: u64 = 2;
 const EInvalidOwner: u64 = 3;
+const ESignatureExpired: u64 = 4;
+const ESignatureInFuture: u64 = 5;
 
 // PCR0: Enclave image file
 // PCR1: Enclave Kernel
@@ -100,7 +103,16 @@ public fun verify_signature<T, P: drop>(
     timestamp_ms: u64,
     payload: P,
     signature: &vector<u8>,
+    clock: &Clock,
+    max_age_ms: u64
 ): bool {
+    let now = clock::timestamp_ms(clock);
+    
+    // Prevent usage of signatures from the future
+    assert!(timestamp_ms <= now, ESignatureInFuture);
+    
+    // Prevent usage of expired signatures
+    assert!(now - timestamp_ms <= max_age_ms, ESignatureExpired);
     let intent_message = create_intent_message(intent_scope, timestamp_ms, payload);
     let payload = bcs::to_bytes(&intent_message);
     return ed25519::ed25519_verify(signature, &enclave.pk, &payload)

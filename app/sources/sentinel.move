@@ -21,7 +21,7 @@ use std::bcs;
 use std::debug;
 use std::address;
 use sui::address::from_bytes;
-
+use sui::random::{Self, Random};
 
 
 const SENTINEL_INTENT: u8 = 1;
@@ -48,6 +48,7 @@ const BASIS_POINTS: u64 = 10000;
 const WITHDRAWAL_LOCK_PERIOD_MS: u64 =1209600000;             // 14 days in milliseconds
 const PROMPT_UPDATE_WINDOW_MS: u64 = 10800000; // 3 hours in milliseconds
 const MAX_TEXT_LENGTH: u64 = 64000; // ~64KB, intentionally setting large for complex AI instructions
+const MAX_SIGNATURE_MS: u64 = 60_000;
 
 public struct Agent has key, store {
     id: UID,
@@ -222,11 +223,13 @@ fun init(otw: SENTINEL, ctx: &mut TxContext) {
     transfer::share_object(protocol_config);
 }
 
+#[allow(lint(public_random))]
 public fun request_attack(
     registry: &AgentRegistry,
     agent: &mut Agent,
     config: &ProtocolConfig,
     payment: Coin<SUI>,
+    r: &Random,
     ctx: &mut TxContext
 ): Attack {
     // Validate agent
@@ -258,7 +261,9 @@ public fun request_attack(
     
     balance::join(&mut agent.balance, payment_balance);
     
-    let nonce = tx_context::epoch(ctx);
+    let mut generator = random::new_generator(r, ctx);
+    let nonce = random::generate_u64(&mut generator);
+
     let attacker = ctx.sender();
 
     // Create attack
@@ -286,20 +291,21 @@ public fun request_attack(
 
 
 #[allow(lint(self_transfer))]
-public fun register_agent<T>(
+public fun register_agent(
     registry: &mut AgentRegistry,
     agent_id: String,
     timestamp_ms: u64,
     cost_per_message: u64,
     system_prompt: String,
     sig: &vector<u8>,
-    enclave: &Enclave<T>,
+    enclave: &Enclave<SENTINEL>,
+    clock: &Clock,
     ctx: &mut TxContext,
 ) {
     assert!(string::length(&system_prompt) <= MAX_TEXT_LENGTH, ETextTooLong);
     let creator = ctx.sender();
     
-    let res = enclave::verify_signature<T, RegisterAgentResponse>(enclave, SENTINEL_INTENT, timestamp_ms, RegisterAgentResponse { agent_id, cost_per_message, system_prompt, is_defeated:false, creator }, sig);
+    let res = enclave::verify_signature<SENTINEL, RegisterAgentResponse>(enclave, SENTINEL_INTENT, timestamp_ms, RegisterAgentResponse { agent_id, cost_per_message, system_prompt, is_defeated:false, creator }, sig, clock, MAX_SIGNATURE_MS);
     assert!(res, EInvalidSignature);
     let agent = Agent {
         id: object::new(ctx),
@@ -349,7 +355,7 @@ public fun fund_agent(agent: &mut Agent, payment: Coin<SUI>, clock: &Clock, ctx:
     });
 }
 
-public fun consume_prompt<T>(
+public fun consume_prompt(
     registry: &AgentRegistry,
     agent: &mut Agent,
     success: bool,
@@ -358,8 +364,9 @@ public fun consume_prompt<T>(
     score: u8,
     timestamp_ms: u64,
     sig: &vector<u8>,
-    enclave: &Enclave<T>,
+    enclave: &Enclave<SENTINEL>,
     attack: Attack,
+    clock: &Clock,
     ctx: &mut TxContext,
 ) {
 
@@ -391,12 +398,14 @@ public fun consume_prompt<T>(
         message_hash
     };
     
-    let verification_result = enclave::verify_signature<T, ConsumePromptResponse>(
+    let verification_result = enclave::verify_signature<SENTINEL, ConsumePromptResponse>(
         enclave, 
         CONSUME_PROMPT_INTENT, 
         timestamp_ms, 
         response, 
-        sig
+        sig,
+        clock,
+        MAX_SIGNATURE_MS
     );
     assert!(verification_result, EInvalidSignature);
 
@@ -675,6 +684,7 @@ fun test_register_agent_flow() {
               system_prompt,
                &sig,
                 &enclave,
+                &clock,
                  ctx(&mut scenario));
             test_scenario::return_shared(config);
             clock.destroy_for_testing();
