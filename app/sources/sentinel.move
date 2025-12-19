@@ -239,39 +239,25 @@ public fun request_attack(
     assert!(total_amount >= agent.cost_per_message, EInvalidAmount);
     
     // Calculate fee distribution
-    let amount_to_agent = (total_amount * config.agent_balance_fee) / BASIS_POINTS;
     let amount_to_creator = (total_amount * config.creator_fee) / BASIS_POINTS;
     let amount_to_protocol = (total_amount * config.protocol_fee) / BASIS_POINTS;
-    
-    // Handle rounding - any remainder goes to agent balance
-    let distributed = amount_to_agent + amount_to_creator + amount_to_protocol;
-    let remainder = total_amount - distributed;
-    let amount_to_agent = amount_to_agent + remainder;
+    let amount_to_agent = total_amount - amount_to_creator - amount_to_protocol;
 
-    // Split the payment
+
     let mut payment_balance = coin::into_balance(payment);
-    
-    // Transfer to agent balance (prize pool)
-    let agent_balance = balance::split(&mut payment_balance, amount_to_agent);
-    balance::join(&mut agent.balance, agent_balance);
-    
-    // Transfer to creator
+
     if (amount_to_creator > 0) {
         let creator_balance = balance::split(&mut payment_balance, amount_to_creator);
-        let creator_coin = coin::from_balance(creator_balance, ctx);
-        transfer::public_transfer(creator_coin, agent.creator);
+        transfer::public_transfer(coin::from_balance(creator_balance, ctx), agent.creator);
     };
     
-    // Transfer to protocol wallet
     if (amount_to_protocol > 0) {
         let protocol_balance = balance::split(&mut payment_balance, amount_to_protocol);
-        let protocol_coin = coin::from_balance(protocol_balance, ctx);
-        transfer::public_transfer(protocol_coin, config.protocol_wallet);
+        transfer::public_transfer(coin::from_balance(protocol_balance, ctx), config.protocol_wallet);
     };
-
-    // Destroy any remaining dust (should be empty)
-    balance::destroy_zero(payment_balance);
-    // Generate nonce using TxContext epoch for uniqueness
+    
+    balance::join(&mut agent.balance, payment_balance);
+    
     let nonce = tx_context::epoch(ctx);
     let attacker = ctx.sender();
 
@@ -308,12 +294,10 @@ public fun register_agent<T>(
     system_prompt: String,
     sig: &vector<u8>,
     enclave: &Enclave<T>,
-    clock: &Clock,
     ctx: &mut TxContext,
 ) {
     assert!(string::length(&system_prompt) <= MAX_TEXT_LENGTH, ETextTooLong);
     let creator = ctx.sender();
-    let current_time = clock::timestamp_ms(clock);
     
     let res = enclave::verify_signature<T, RegisterAgentResponse>(enclave, SENTINEL_INTENT, timestamp_ms, RegisterAgentResponse { agent_id, cost_per_message, system_prompt, is_defeated:false, creator }, sig);
     assert!(res, EInvalidSignature);
@@ -325,7 +309,7 @@ public fun register_agent<T>(
         system_prompt,
         balance: balance::zero(),
         last_funded_timestamp: 0,
-        created_at: current_time
+        created_at: timestamp_ms
     };
     
     let agent_object_id = object::id(&agent);
@@ -691,7 +675,6 @@ fun test_register_agent_flow() {
               system_prompt,
                &sig,
                 &enclave,
-                &clock,
                  ctx(&mut scenario));
             test_scenario::return_shared(config);
             clock.destroy_for_testing();
