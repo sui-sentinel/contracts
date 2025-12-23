@@ -109,11 +109,13 @@ public struct RegisterAgentResponse has copy, drop {
 public struct ConsumePromptResponse has copy, drop {
     agent_id: String,
     success: bool,
-    explanation: String,
     score: u8,
     attacker: address,
     nonce: u64,
-    message_hash: address
+    message_hash: address,
+    agent_response: String,
+    jury_response: String,
+    fun_response: String,
 }
 
 
@@ -133,6 +135,8 @@ public struct PromptConsumed has copy, drop {
     sender: address,
     message: String,
     agent_response: String,
+    jury_response: String,
+    fun_response: String,
     score: u8
 }
 
@@ -359,7 +363,9 @@ public fun consume_prompt(
     registry: &AgentRegistry,
     agent: &mut Agent,
     success: bool,
-    explanation: String,
+    agent_response: String,
+    jury_response: String,
+    fun_response: String,
     prompt: String,
     score: u8,
     timestamp_ms: u64,
@@ -391,11 +397,13 @@ public fun consume_prompt(
     let response = ConsumePromptResponse {
         agent_id: agent.agent_id,
         success,
-        explanation,
         score,
         attacker: ctx.sender(),
         nonce: attack_nonce,
-        message_hash
+        message_hash,
+        agent_response,
+        jury_response,
+        fun_response
     };
     
     let verification_result = enclave::verify_signature<SENTINEL, ConsumePromptResponse>(
@@ -435,7 +443,9 @@ public fun consume_prompt(
         amount: reward_amount,
         sender: caller,
         message: prompt,
-        agent_response: explanation,
+        agent_response,
+        jury_response,
+        fun_response,
         score
     });
 }
