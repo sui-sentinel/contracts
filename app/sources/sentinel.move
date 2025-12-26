@@ -328,6 +328,7 @@ public fun register_agent(
     
     let res = enclave::verify_signature<SENTINEL, RegisterAgentResponse>(enclave, SENTINEL_INTENT, timestamp_ms, RegisterAgentResponse { agent_id, cost_per_message, system_prompt, is_defeated:false, creator }, sig, clock, MAX_SIGNATURE_MS);
     assert!(res, EInvalidSignature);
+    let current_time = clock::timestamp_ms(clock);
     let agent = Agent {
         id: object::new(ctx),
         agent_id,
@@ -335,7 +336,7 @@ public fun register_agent(
         cost_per_message,
         system_prompt,
         balance: balance::zero(),
-        last_funded_timestamp: 0,
+        last_funded_timestamp: current_time,
         created_at: timestamp_ms
     };
     
@@ -504,14 +505,16 @@ public fun update_protocol_wallet(
 ) {
     assert!(ctx.sender() == config.admin, ENotAuthorized);
     
-    let old_wallet = config.protocol_wallet;
-    config.protocol_wallet = new_wallet;
-    
-    event::emit(ProtocolWalletUpdated {
-        old_wallet,
-        new_wallet,
-        updated_by: ctx.sender(),
-    });
+    if (config.protocol_wallet != new_wallet) {
+        let old_wallet = config.protocol_wallet;
+        config.protocol_wallet = new_wallet;
+        
+        event::emit(ProtocolWalletUpdated {
+            old_wallet,
+            new_wallet,
+            updated_by: ctx.sender(),
+        });
+    }
 }
 
 /// Transfer admin role (only current admin)
@@ -651,9 +654,6 @@ public fun update_agent_prompt(agent: &mut Agent, new_prompt: String, clock: &Cl
 
 /// Check if withdrawal is currently unlocked
 public fun is_withdrawal_unlocked(agent: &Agent, clock: &sui::clock::Clock): bool {
-    if (agent.last_funded_timestamp == 0) {
-        return true // Never funded, can withdraw
-    };
     let current_time = clock::timestamp_ms(clock);
     let time_since_last_funding = current_time - agent.last_funded_timestamp;
     time_since_last_funding >= WITHDRAWAL_LOCK_PERIOD_MS
