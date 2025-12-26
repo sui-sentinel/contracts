@@ -14,6 +14,9 @@ const EInvalidCap: u64 = 2;
 const EInvalidOwner: u64 = 3;
 const ESignatureExpired: u64 = 4;
 const ESignatureInFuture: u64 = 5;
+const ENotOneTimeWitness: u64 = 6;
+const EInvalidConfig: u64 = 7;
+
 
 // PCR0: Enclave image file
 // PCR1: Enclave Kernel
@@ -39,6 +42,7 @@ public struct Enclave<phantom T> has key {
     id: UID,
     pk: vector<u8>,
     config_version: u64,
+    config_id: ID,
     owner: address,
 }
 
@@ -55,7 +59,10 @@ public struct IntentMessage<T: drop> has copy, drop {
 }
 
 /// Create a new `Cap` using a `witness` T from a module.
-public fun new_cap<T: drop>(_: T, ctx: &mut TxContext): Cap<T> {
+public fun new_cap<T: drop>(otw: T, ctx: &mut TxContext): Cap<T> {
+    // ✅ Verify it's a one-time witness
+    assert!(sui::types::is_one_time_witness(&otw), ENotOneTimeWitness);
+    
     Cap {
         id: object::new(ctx),
     }
@@ -92,6 +99,7 @@ public fun register_enclave<T>(
         pk,
         config_version: enclave_config.version,
         owner: ctx.sender(),
+        config_id: enclave_config.id.to_inner()
     };
 
     transfer::share_object(enclave);
@@ -151,17 +159,14 @@ public fun pk<T>(enclave: &Enclave<T>): &vector<u8> {
     &enclave.pk
 }
 
-public fun destroy_old_enclave<T>(e: Enclave<T>, config: &EnclaveConfig<T>) {
+public fun destroy_old_enclave<T>(e: Enclave<T>, config: &EnclaveConfig<T>, ctx: &TxContext) {
+    assert!(e.config_id == config.id.to_inner(), EInvalidConfig);
     assert!(e.config_version < config.version, EInvalidConfigVersion);
+     assert!(e.owner == ctx.sender(), EInvalidOwner);
     let Enclave { id, .. } = e;
     id.delete();
 }
 
-public fun deploy_old_enclave_by_owner<T>(e: Enclave<T>, ctx: &mut TxContext) {
-    assert!(e.owner == ctx.sender(), EInvalidOwner);
-    let Enclave { id, .. } = e;
-    id.delete();
-}
 
 fun assert_is_valid_for_config<T>(cap: &Cap<T>, enclave_config: &EnclaveConfig<T>) {
     assert!(cap.id.to_inner() == enclave_config.capability_id, EInvalidCap);
