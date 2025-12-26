@@ -47,7 +47,6 @@ const MAX_SIGNATURE_MS: u64 = 60_000;
 public struct Agent has key, store {
     id: UID,
     agent_id: String,
-    // REMOVED: creator address. Ownership is defined solely by AgentCap.
     cost_per_message: u64,
     system_prompt: String,
     balance: Balance<SUI>,          // The reward pool for attackers
@@ -376,7 +375,6 @@ public fun fund_agent(
     });
 }
 
-// === NEW FUNCTION: Claims accumulated owner fees ===
 public fun claim_fees(
     agent: &mut Agent,
     cap: &AgentCap,
@@ -636,8 +634,12 @@ public fun get_agent_balance(agent: &Agent): u64 {
     balance::value(&agent.balance)
 }
 
-public fun update_agent_cost(agent: &mut Agent, cap: &AgentCap, new_cost: u64, _ctx: &TxContext) {
+public fun update_agent_cost(agent: &mut Agent, cap: &AgentCap, new_cost: u64, clock: &Clock, _ctx: &TxContext) {
     assert!(agent.agent_id == cap.agent_id, EInvalidCap);
+    let current_time = clock::timestamp_ms(clock);
+    let time_elapsed = current_time - agent.created_at;
+    
+    assert!(time_elapsed <= PROMPT_UPDATE_WINDOW_MS, EPromptUpdateLocked);
     agent.cost_per_message = new_cost;
 }
 
