@@ -33,7 +33,6 @@ const EInsufficientBalance: u64 = 3;
 const EInvalidAmount: u64 = 4;
 const ELowScore: u64 = 5;
 const ENotAuthorized: u64 = 6;
-const EAttackUsed: u64 = 7;
 const EAttackAgentMismatch: u64 = 8;
 const EInvalidFeeRatio: u64 = 9;
 const EWithdrawalLocked: u64 = 10;
@@ -191,7 +190,6 @@ public struct Attack has key, store {
     attacker: address,
     paid_amount: u64,
     nonce: u64,
-    used: bool,
 }
 
 
@@ -277,7 +275,6 @@ public fun request_attack(
         attacker,
         paid_amount: total_amount,
         nonce,
-        used: false,
     };
 
     event::emit(FeeTransferred {
@@ -382,10 +379,8 @@ public fun consume_prompt(
         attacker: attack_attacker,
         paid_amount: _,
         nonce: attack_nonce,
-        used: attack_used,
     } = attack;
 
-    assert!(!attack_used, EAttackUsed);
     assert!(table::contains(&registry.agents, agent.agent_id), EAgentNotFound);
     assert!(agent.agent_id == attack_agent_id, EAttackAgentMismatch);
     assert!(ctx.sender() == attack_attacker, ENotAuthorized);
