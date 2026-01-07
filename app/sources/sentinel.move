@@ -33,6 +33,7 @@ const ETextTooLong: u64 = 12;
 const EEnclaveNotSet: u64 = 13;
 const EInvalidEnclave: u64 = 14;
 const EInvalidCap: u64 = 15;
+const EExistingWallet: u64 = 16;
 
 // Fee percentage constants (in basis points, 100 = 1%)
 const DEFAULT_AGENT_BALANCE_FEE: u64 = 5000;  // 50%
@@ -519,17 +520,17 @@ public fun update_protocol_wallet(
     ctx: &TxContext
 ) {
     assert!(ctx.sender() == config.admin, ENotAuthorized);
+    assert!(config.protocol_wallet != new_wallet, EExistingWallet);
     
-    if (config.protocol_wallet != new_wallet) {
-        let old_wallet = config.protocol_wallet;
-        config.protocol_wallet = new_wallet;
-        
-        event::emit(ProtocolWalletUpdated {
-            old_wallet,
-            new_wallet,
-            updated_by: ctx.sender(),
-        });
-    }
+    let old_wallet = config.protocol_wallet;
+    config.protocol_wallet = new_wallet;
+    
+    event::emit(ProtocolWalletUpdated {
+        old_wallet,
+        new_wallet,
+        updated_by: ctx.sender(),
+    });
+    
 }
 
 public fun transfer_admin(
