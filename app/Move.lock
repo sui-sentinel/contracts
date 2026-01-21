@@ -58,11 +58,3 @@ source = { local = "../enclave" }
 use_environment = "testnet"
 manifest_digest = "E39991DA2274AA5477B7E0536AB13E28AAAC16A7916CDA884147EB6EE5202AE9"
 deps = { Sui = "Sui" }
-
-[env]
-
-[env.testnet]
-chain-id = "4c78adac"
-original-published-id = "0x580bf20669dc05d90cc3a3449173e9808c192395146c21de481d3fc1936e16a4"
-latest-published-id = "0x580bf20669dc05d90cc3a3449173e9808c192395146c21de481d3fc1936e16a4"
-published-version = "1"

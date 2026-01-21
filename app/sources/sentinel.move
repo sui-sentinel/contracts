@@ -417,7 +417,6 @@ public fun consume_prompt(
     ctx: &mut TxContext,
 ) {
     verify_canonical_enclave(config, enclave);
-    assert!(!is_withdrawal_unlocked(agent, clock), EWithdrawalLocked);
     let Attack {
         id: attack_object_id,
         agent_id: attack_agent_id,
