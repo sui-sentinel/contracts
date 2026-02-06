@@ -66,7 +66,7 @@ export async function publishPackage(client: SuiClient, signer: Keypair, package
     const transaction = new Transaction();
 
     const { modules, dependencies } = JSON.parse(
-        execSync(`sui move build --dump-bytecode-as-base64 --path ${packagePath}`, {
+        execSync(`sui move build --dump-bytecode-as-base64 --ignore-chain --path ${packagePath}`, {
             encoding: 'utf-8',
         }),
     );

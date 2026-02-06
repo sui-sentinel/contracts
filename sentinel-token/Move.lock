@@ -3,7 +3,7 @@
 
 [move]
 version = 3
-manifest_digest = "FD7ECB82CFAB2278EE5CD5453AFBB0F2891C2E0086FA0B5B4B68D700EC7F0144"
+manifest_digest = "9E504435D01ACBA0666B3A9C58FEA266AB760EFE0B72CFE0BAD79685B88CDEA3"
 deps_digest = "F8BBB0CCB2491CA29A3DF03D6F92277A4F3574266507ACD77214D37ECA3F3082"
 dependencies = [
   { id = "Sui", name = "Sui" },
@@ -27,27 +27,27 @@ edition = "2024.beta"
 flavor = "sui"
 
 [pinned.testnet.MoveStdlib]
-source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/move-stdlib", rev = "24a06e81cd39ac4b210f1a15e5111eca65b3bcae" }
+source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/move-stdlib", rev = "5484a7e2b67cfc116cd235fa0b8e2b858058823b" }
 use_environment = "testnet"
 manifest_digest = "C4FE4C91DE74CBF223B2E380AE40F592177D21870DC2D7EB6227D2D694E05363"
 deps = {}
 
 [pinned.testnet.Sui]
-source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "24a06e81cd39ac4b210f1a15e5111eca65b3bcae" }
+source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "5484a7e2b67cfc116cd235fa0b8e2b858058823b" }
 use_environment = "testnet"
 manifest_digest = "7AFB66695545775FBFBB2D3078ADFD084244D5002392E837FDE21D9EA1C6D01C"
 deps = { MoveStdlib = "MoveStdlib" }
 
-[pinned.testnet.enclave]
+[pinned.testnet.sentinel]
 source = { root = true }
 use_environment = "testnet"
-manifest_digest = "E39991DA2274AA5477B7E0536AB13E28AAAC16A7916CDA884147EB6EE5202AE9"
+manifest_digest = "0532D72C4F42A4472D331C54E2F8FB1595A305815D58568D26C6F8A4AC9BBFCE"
 deps = { Sui = "Sui" }
 
 [env]
 
 [env.testnet]
 chain-id = "4c78adac"
-original-published-id = "0x4db142b98001936f97adcf1f15a625fef0a2f3b1a59ef36b23ecf26e938a33ac"
-latest-published-id = "0x4db142b98001936f97adcf1f15a625fef0a2f3b1a59ef36b23ecf26e938a33ac"
+original-published-id = "0xb0a3b08be99cb5becf1787e565cdd027edc40791df89ca4a603ba7d1575b21e9"
+latest-published-id = "0xb0a3b08be99cb5becf1787e565cdd027edc40791df89ca4a603ba7d1575b21e9"
 published-version = "1"
