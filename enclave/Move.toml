@@ -3,6 +3,7 @@ name = "enclave"
 edition = "2024.beta" # edition = "legacy" to use legacy (pre-2024) Move
 # license = ""           # e.g., "MIT", "GPL", "Apache 2.0"
 # authors = ["..."]      # e.g., ["Joe Smith (joesmith@noemail.com)", "John Snow (johnsnow@noemail.com)"]
+published-at = "0x74b12d0903b409cdcb1ce06280ff3eef7b35622ae164c1d7c4cd154231d89f25"
 
 [dependencies]
 Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework/", rev = "mainnet-v1.48.4" }
@@ -19,7 +20,7 @@ Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-fram
 # Override = { local = "../conflicting/version", override = true }
 
 [addresses]
-enclave = "0x0"
+enclave = "0x74b12d0903b409cdcb1ce06280ff3eef7b35622ae164c1d7c4cd154231d89f25"
 sui = "0x2"
 
 # Named addresses will be accessible in Move as `@name`. They're also exported:
