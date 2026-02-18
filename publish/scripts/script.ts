@@ -7,7 +7,9 @@ import path from 'node:path';
 
 type Network = 'testnet' | 'devnet' | 'mainnet';
 
-const DEFAULT_CONFIG_PATH = path.resolve(__dirname, 'script.config.json');
+function getDefaultConfigPath(network: Network): string {
+    return path.resolve(__dirname, `${network}.config.json`);
+}
 
 type ScriptConfigFile = {
     PCR0: string;
@@ -40,12 +42,13 @@ Commands:
   update-pcrs
   register-enclave
   set-canonical-enclave
+  update-canonical-enclave
   print-config
 
 Common options:
   --network <testnet|devnet|mainnet>   (default: testnet)
   --gas-budget <number>               (default: from config file)
-  --config <path>                     (default: ${DEFAULT_CONFIG_PATH})
+  --config <path>                     (default: <network>.config.json, e.g., testnet.config.json)
 
 Config options (override defaults or env vars):
   --pcr0 <hex> --pcr1 <hex> --pcr2 <hex>
@@ -85,10 +88,11 @@ function normalizeObjectId(raw: string): string {
 }
 
 function getConfig(values: Record<string, unknown>) {
-    const configPath = (values.config as string | undefined) ?? DEFAULT_CONFIG_PATH;
+    const network = (values.network ?? process.env.NETWORK ?? 'testnet') as Network;
+    const configPath = (values.config as string | undefined) ?? getDefaultConfigPath(network);
     const fileConfig = loadConfigFile(configPath);
     return {
-        network: (values.network ?? process.env.NETWORK ?? 'testnet') as Network,
+        network,
         pcr0: (values.pcr0 ?? process.env.PCR0 ?? fileConfig.PCR0) as string,
         pcr1: (values.pcr1 ?? process.env.PCR1 ?? fileConfig.PCR1) as string,
         pcr2: (values.pcr2 ?? process.env.PCR2 ?? fileConfig.PCR2) as string,
@@ -212,6 +216,24 @@ async function setCanonicalEnclave(config: ReturnType<typeof getConfig>) {
     console.log(JSON.stringify(resp, null, 2));
 }
 
+async function updateCanonicalEnclave(config: ReturnType<typeof getConfig>) {
+    const tx = new Transaction();
+    tx.setGasBudget(config.gasBudget);
+
+    tx.moveCall({
+        target: `${config.appPackageId}::sentinel::update_canonical_enclave`,
+        arguments: [
+            tx.object(config.protocolConfigId),
+            tx.object(config.enclaveObjectId),
+            tx.object(config.clockObjectId),
+        ],
+    });
+
+    const client = await getClient(config.network);
+    const resp = await executeTransaction(client, tx);
+    console.log(JSON.stringify(resp, null, 2));
+}
+
 function printConfig(config: ReturnType<typeof getConfig>) {
     console.log(JSON.stringify(config, null, 2));
 }
@@ -258,6 +280,9 @@ async function main() {
             break;
         case 'set-canonical-enclave':
             await setCanonicalEnclave(config);
+            break;
+        case 'update-canonical-enclave':
+            await updateCanonicalEnclave(config);
             break;
         case 'print-config':
             printConfig(config);
