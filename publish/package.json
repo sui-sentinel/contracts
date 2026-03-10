@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "dotenv -- jest",
-    "admin-objects": "dotenv -- ts-node scripts/save_admin_objects.ts"
+    "admin-objects": "dotenv -- ts-node scripts/save_admin_objects.ts",
+    "upgrade-caps": "dotenv -- ts-node scripts/get_upgrade_caps.ts"
   },
   "keywords": [],
   "author": "",
