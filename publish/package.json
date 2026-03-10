@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "dotenv -- jest"
+    "test": "dotenv -- jest",
+    "admin-objects": "dotenv -- ts-node scripts/save_admin_objects.ts"
   },
   "keywords": [],
   "author": "",

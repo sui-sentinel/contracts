@@ -48,7 +48,6 @@ the token wasn’t used before,
 
 and then burns the token and distributes reward.
 
-
 ## Deployment Addresses
 
 ### Testnet
@@ -59,8 +58,57 @@ Upgrade Cap Object ID: 0xf83b48506a70b7d067d95ce54aa761160e8a7d226c1d6ab5520d765
 Enclave Config object ID: 0xf83b48506a70b7d067d95ce54aa761160e8a7d226c1d6ab5520d765b5e9d4787
 Cap Object ID: 0x97328eedf5a0038c92389062b7a5f7bc7fdc762a31348825fe249a95cf27d9db
 Agent Registry Object ID: 0x176f639651ecf7f72c43a0fa2abe76f3fb4b7d0a86a475c9ad9059bfad6eff95
-Protocol config object id: 0x077ff74c2c033261a4eaecf3840cfba49a64c19d713be8d9ea17c17e0080eb58 
+Protocol config object id: 0x077ff74c2c033261a4eaecf3840cfba49a64c19d713be8d9ea17c17e0080eb58
 
+0xb0a3b08be99cb5becf1787e565cdd027edc40791df89ca4a603ba7d1575b21e9::sentinel::SENTINEL
 
 ### Mainnet
+
 NA
+
+```
+sui client transfer \
+  --object-id <YOUR_CUSTOM_COIN_OBJECT_ID> \
+  --to <RECIPIENT_ADDRESS> \
+  --gas-budget 20000000
+  ``
+
+
+```
+
+sui client transfer --to 0xc647dfdb8d8b575809902c9b86a26b6ace9f9271dfe5385468f503833a237177 --object-id 0xc30d67a66387a31f2e0b671c90a6db10c047438cf3017ed1b90c10baf1022b8d
+
+```
+
+```
+
+Check Active Address
+
+```bash
+sui client active-address
+```
+
+Switch Env to mainnet
+
+```bash
+sui client switch --env mainnet
+```
+
+Check Active Env
+
+```bash
+sui client active-env
+```
+
+```bash
+sui client objects --filter 0x4db142b98001936f97adcf1f15a625fef0a2f3b1a59ef36b23ecf26e938a33ac::enclave::Cap
+```
+
+sui client objects --json | jq -r '.[] | select(.objectType == "0x4db142b98001936f97adcf1f15a625fef0a2f3b1a59ef36b23ecf26e938a33ac::enclave::Cap")'
+
+sui client query "0x4db142b98001936f97adcf1f15a625fef0a2f3b1a59ef36b23ecf26e938a33ac::enclave::EnclaveConfig" --limit 10
+
+
+EnclaveConfig = 0x7c7bde1f1026d9ae7672593a1c860e629e98a2855fa0fabc429faba382c37277
+ProtocolRegistry = 0x29e941ef8ab71e09d23336f34c7535983586e071eee107f927e3dcffa8cb8fbe
+ProtocolConfig = 0x168ce294a3b3ca3456f505ae0fd58fe0bbe660725b7fce41c3263f3aade0094d

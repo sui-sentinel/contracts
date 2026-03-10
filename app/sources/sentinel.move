@@ -242,12 +242,14 @@ public fun request_attack<T>(
     config: &ProtocolConfig,
     payment: Coin<T>,
     r: &Random,
+    clock: &Clock,
     ctx: &mut TxContext
 ): Attack<T> {
     assert!(table::contains(&registry.agents, agent.agent_id), EAgentNotFound);
     let registered_id = *table::borrow(&registry.agents, agent.agent_id);
     assert!(object::id(agent) == registered_id, EAgentNotFound);
     assert!(is_token_whitelisted<T>(config), ETokenNotWhitelisted);
+    assert!(!is_withdrawal_unlocked(agent, clock), EWithdrawalLocked);
 
     let total_amount = coin::value(&payment);
     assert!(total_amount >= agent.cost_per_message, EInvalidAmount);
@@ -812,4 +814,3 @@ fun test_register_agent_flow() {
     test_scenario::end(scenario);
     destroy(protocol_config);
 }
-
