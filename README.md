@@ -112,3 +112,10 @@ sui client query "0x4db142b98001936f97adcf1f15a625fef0a2f3b1a59ef36b23ecf26e938a
 EnclaveConfig = 0x7c7bde1f1026d9ae7672593a1c860e629e98a2855fa0fabc429faba382c37277
 ProtocolRegistry = 0x29e941ef8ab71e09d23336f34c7535983586e071eee107f927e3dcffa8cb8fbe
 ProtocolConfig = 0x168ce294a3b3ca3456f505ae0fd58fe0bbe660725b7fce41c3263f3aade0094d
+
+
+
+
+First is register the new enclave
+
+
