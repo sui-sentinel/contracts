@@ -27,6 +27,7 @@ type ScriptConfigFile = {
     ENCLAVE_OBJECT_ID: string;
     CLOCK_OBJECT_ID: string;
     GAS_BUDGET: number;
+    TOKENS_TO_WHITELIST: string[];
 };
 
 function loadConfigFile(configPath: string): ScriptConfigFile {
@@ -43,6 +44,7 @@ Commands:
   register-enclave
   set-canonical-enclave
   update-canonical-enclave
+  add-whitelisted-tokens
   print-config
 
 Common options:
@@ -122,6 +124,7 @@ function getConfig(values: Record<string, unknown>) {
         ),
         gasBudget: Number(values['gas-budget'] ?? process.env.GAS_BUDGET ?? fileConfig.GAS_BUDGET),
         attestationHex: values['attestation-hex'] as string | undefined,
+        tokensToWhitelist: fileConfig.TOKENS_TO_WHITELIST ?? [],
     };
 }
 
@@ -234,6 +237,30 @@ async function updateCanonicalEnclave(config: ReturnType<typeof getConfig>) {
     console.log(JSON.stringify(resp, null, 2));
 }
 
+async function addWhitelistedTokens(config: ReturnType<typeof getConfig>) {
+    const tokens = config.tokensToWhitelist;
+    if (tokens.length === 0) {
+        console.log('No tokens to whitelist in config.');
+        return;
+    }
+
+    const tx = new Transaction();
+    tx.setGasBudget(config.gasBudget);
+
+    for (const token of tokens) {
+        tx.moveCall({
+            target: `${config.appPackageId}::sentinel::add_whitelisted_token`,
+            typeArguments: [token],
+            arguments: [tx.object(config.protocolConfigId)],
+        });
+        console.log(`Adding token to whitelist: ${token}`);
+    }
+
+    const client = await getClient(config.network);
+    const resp = await executeTransaction(client, tx);
+    console.log(JSON.stringify(resp, null, 2));
+}
+
 function printConfig(config: ReturnType<typeof getConfig>) {
     console.log(JSON.stringify(config, null, 2));
 }
@@ -283,6 +310,9 @@ async function main() {
             break;
         case 'update-canonical-enclave':
             await updateCanonicalEnclave(config);
+            break;
+        case 'add-whitelisted-tokens':
+            await addWhitelistedTokens(config);
             break;
         case 'print-config':
             printConfig(config);
