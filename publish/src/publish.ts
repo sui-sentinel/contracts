@@ -21,7 +21,7 @@ export class PublishSingleton {
             keypair = ADMIN_KEYPAIR;
         }
         if (!packagePath) {
-            packagePath = `${__dirname}/../../sentinel`;
+            throw new Error("Package path is required");
         }
         if (!PublishSingleton.instance) {
             const resp = await publishPackage(client, keypair, packagePath);
@@ -76,11 +76,8 @@ export async function publishPackage(client: SuiClient, signer: Keypair, package
         dependencies
     });
 
-    // Burn upgradeCap
-    transaction.moveCall({
-        target: "0x2::package::make_immutable",
-        arguments: [upgradeCap]
-    });
+    // Transfer upgradeCap to the signer
+    transaction.transferObjects([upgradeCap], signer.toSuiAddress());
 
     return await client.signAndExecuteTransaction({
         transaction,
