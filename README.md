@@ -108,14 +108,19 @@ sui client objects --json | jq -r '.[] | select(.objectType == "0x4db142b9800193
 
 sui client query "0x4db142b98001936f97adcf1f15a625fef0a2f3b1a59ef36b23ecf26e938a33ac::enclave::EnclaveConfig" --limit 10
 
-
 EnclaveConfig = 0x7c7bde1f1026d9ae7672593a1c860e629e98a2855fa0fabc429faba382c37277
 ProtocolRegistry = 0x29e941ef8ab71e09d23336f34c7535983586e071eee107f927e3dcffa8cb8fbe
 ProtocolConfig = 0x168ce294a3b3ca3456f505ae0fd58fe0bbe660725b7fce41c3263f3aade0094d
 
-
-
-
 First is register the new enclave
 
+# Steps To Publish contracts
 
+1. Run `scripts/publish.ts` and select testnet, enclave and deploy enclave contract
+2. You will get enclave package ID in response, set it in `testnet.config.json`
+3. Update `enclave/Move.toml` and and add `published-at` with new enclave package ID and also update `[enclave]addresses` to package ID
+4. Now deploy app contract using `scripts/publish.ts` and select testnet -> app
+5. Update `APP_PACKAGE_ID`, `AGENT_REGISTRY`, `PROTOCOL_CONFIG_ID`, `ENCLAVE_CONFIG_OBJECT_ID`, `CAP_OBJECT_ID` from new log file generated in `logs` folder
+6. Update PCRs on-chain using `bun run scripts/script.ts update-pcrs  --network testnet`
+7. Register Enclave using `bun run scripts/script.ts register-enclave --network testnet`
+8. You will get  `ENCLAVE_OBJECT_ID` in response. set it in `testnet.config.json`

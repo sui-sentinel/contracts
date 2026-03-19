@@ -6,7 +6,7 @@ authors = ["Satyam Bansal <satyambnsal@gmail.com>"]
 
 [dependencies]
 enclave = { local = "../enclave" }
-Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework/", rev = "mainnet-v1.48.4" }
+# Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework/", rev = "mainnet-v1.48.4" }
 
 
 [addresses]
