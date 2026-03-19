@@ -30,6 +30,7 @@ const ENotAuthorized: u64 = 6;
 const EAttackAgentMismatch: u64 = 8;
 const EInvalidFeeRatio: u64 = 9;
 const EWithdrawalLocked: u64 = 10;
+const EAttackWindowClosed: u64 = 18;
 const EPromptUpdateLocked: u64 = 11;
 const ETextTooLong: u64 = 12;
 const EEnclaveNotSet: u64 = 13;
@@ -47,6 +48,8 @@ const WITHDRAWAL_LOCK_PERIOD_MS: u64 = 1209600000;             // 14 days
 const PROMPT_UPDATE_WINDOW_MS: u64 = 10800000; // 3 hours
 const MAX_TEXT_LENGTH: u64 = 64000;
 const MAX_SIGNATURE_MS: u64 = 60_000;
+const DEFAULT_FEE_INCREASE_BPS: u64 = 500;      // 5% increase per attack
+const DEFAULT_MAX_FEE_MULTIPLIER_BPS: u64 = 30000; // 3x max fee cap
 
 public struct Agent<phantom T> has key, store {
     id: UID,
@@ -56,7 +59,8 @@ public struct Agent<phantom T> has key, store {
     balance: Balance<T>,          // The reward pool for attackers
     accumulated_fees: Balance<T>, // New: Fees collected for the Owner
     last_funded_timestamp: u64,
-    created_at: u64
+    created_at: u64,
+    attack_count: u64
 }
 
 public struct AgentInfo has copy, drop {
@@ -65,7 +69,8 @@ public struct AgentInfo has copy, drop {
     system_prompt: String,
     object_id: ID,
     balance: u64,
-    accumulated_fees: u64
+    accumulated_fees: u64,
+    token_type: TypeName
 }
 
 public struct AgentRegistry has key {
@@ -83,6 +88,8 @@ public struct ProtocolConfig has key {
     admin: address,
     canonical_enclave_id: Option<ID>,
     whitelisted_tokens: VecSet<TypeName>,
+    fee_increase_bps: u64,
+    max_fee_multiplier_bps: u64,
 }
 
 public struct SENTINEL has drop {}
@@ -118,6 +125,7 @@ public struct AgentRegistered has copy, drop {
     cost_per_message: u64,
     initial_balance: u64,
     agent_object_id: ID,
+    token_type: TypeName,
 }
 
 public struct PromptConsumed has copy, drop {
@@ -129,7 +137,8 @@ public struct PromptConsumed has copy, drop {
     agent_response: String,
     jury_response: String,
     fun_response: String,
-    score: u8
+    score: u8,
+    token_type: TypeName
 }
 
 public struct FeeTransferred has copy, drop {
@@ -138,6 +147,7 @@ public struct FeeTransferred has copy, drop {
     amount_to_owner: u64, // Renamed from creator
     amount_to_protocol: u64,
     total_amount: u64,
+    token_type: TypeName,
 }
 
 public struct AgentFunded has copy, drop {
@@ -145,6 +155,7 @@ public struct AgentFunded has copy, drop {
     amount: u64,
     funded_timestamp: u64,
     unlock_timestamp: u64,
+    token_type: TypeName,
 }
 
 public struct AgentDefeated has copy, drop {
@@ -152,6 +163,7 @@ public struct AgentDefeated has copy, drop {
     winner: address,
     score: u8,
     amount_won: u64,
+    token_type: TypeName,
 }
 
 public struct FeeRatiosUpdated has copy, drop {
@@ -171,12 +183,14 @@ public struct FundsWithdrawn has copy, drop {
     agent_id: String,
     amount: u64,
     withdrawn_at: u64,
+    token_type: TypeName,
 }
 
 public struct FeesClaimed has copy, drop {
     agent_id: String,
     owner: address,
-    amount: u64
+    amount: u64,
+    token_type: TypeName,
 }
 
 public struct Attack<phantom T> has key, store {
@@ -231,6 +245,8 @@ fun init(otw: SENTINEL, ctx: &mut TxContext) {
         admin: ctx.sender(),
         canonical_enclave_id: option::none(),
         whitelisted_tokens,
+        fee_increase_bps: DEFAULT_FEE_INCREASE_BPS,
+        max_fee_multiplier_bps: DEFAULT_MAX_FEE_MULTIPLIER_BPS,
     };
     transfer::share_object(protocol_config);
 }
@@ -249,10 +265,15 @@ public fun request_attack<T>(
     let registered_id = *table::borrow(&registry.agents, agent.agent_id);
     assert!(object::id(agent) == registered_id, EAgentNotFound);
     assert!(is_token_whitelisted<T>(config), ETokenNotWhitelisted);
-    assert!(!is_withdrawal_unlocked(agent, clock), EWithdrawalLocked);
+    assert!(!is_withdrawal_unlocked(agent, clock), EAttackWindowClosed);
 
+    // Calculate dynamic fee based on attack count
+    let effective_cost = get_effective_cost(agent, config);
     let total_amount = coin::value(&payment);
-    assert!(total_amount >= agent.cost_per_message, EInvalidAmount);
+    assert!(total_amount >= effective_cost, EInvalidAmount);
+
+    // Increment attack count for next attacker
+    agent.attack_count = agent.attack_count + 1;
     
     let amount_to_owner = (total_amount * config.creator_fee) / BASIS_POINTS;
     let amount_to_protocol = (total_amount * config.protocol_fee) / BASIS_POINTS;
@@ -293,6 +314,7 @@ public fun request_attack<T>(
         amount_to_owner,
         amount_to_protocol,
         total_amount,
+        token_type: type_name::get<T>(),
     });
 
     attack
@@ -334,7 +356,8 @@ public fun register_agent<T>(
         balance: balance::zero<T>(),
         accumulated_fees: balance::zero<T>(),
         last_funded_timestamp: current_time,
-        created_at: timestamp_ms
+        created_at: timestamp_ms,
+        attack_count: 0
     };
     let agent_object_id = object::id(&agent);
     table::add(&mut registry.agents, agent_id, agent_object_id);
@@ -352,6 +375,7 @@ public fun register_agent<T>(
         cost_per_message,
         initial_balance: 0,
         agent_object_id,
+        token_type: type_name::get<T>(),
     });
     transfer::share_object(agent);
 }
@@ -376,6 +400,7 @@ public fun fund_agent<T>(
         amount,
         funded_timestamp: current_time,
         unlock_timestamp,
+        token_type: type_name::get<T>(),
     });
 }
 
@@ -392,7 +417,8 @@ public fun claim_fees<T>(
     event::emit(FeesClaimed {
         agent_id: agent.agent_id,
         owner: ctx.sender(),
-        amount
+        amount,
+        token_type: type_name::get<T>(),
     });
 
     transfer::public_transfer(coin::from_balance(fees, ctx), ctx.sender());
@@ -471,6 +497,7 @@ public fun consume_prompt<T>(
                 winner: caller,
                 score,
                 amount_won: agent_balance,
+                token_type: type_name::get<T>(),
             });
         }
     };
@@ -484,7 +511,8 @@ public fun consume_prompt<T>(
         agent_response,
         jury_response,
         fun_response,
-        score
+        score,
+        token_type: type_name::get<T>(),
     });
 }
 
@@ -541,6 +569,20 @@ public fun transfer_admin(
 ) {
     assert!(ctx.sender() == config.admin, ENotAuthorized);
     config.admin = new_admin;
+}
+
+public fun update_dynamic_fee_settings(
+    config: &mut ProtocolConfig,
+    fee_increase_bps: u64,
+    max_fee_multiplier_bps: u64,
+    ctx: &TxContext
+) {
+    assert!(ctx.sender() == config.admin, ENotAuthorized);
+    // max_fee_multiplier_bps must be >= BASIS_POINTS (1x minimum)
+    assert!(max_fee_multiplier_bps >= BASIS_POINTS, EInvalidFeeRatio);
+
+    config.fee_increase_bps = fee_increase_bps;
+    config.max_fee_multiplier_bps = max_fee_multiplier_bps;
 }
 
 public fun set_canonical_enclave(
@@ -635,6 +677,7 @@ public fun get_agent_info<T>(agent: &Agent<T>): AgentInfo {
         object_id: object::id(agent),
         balance: balance::value(&agent.balance),
         accumulated_fees: balance::value(&agent.accumulated_fees),
+        token_type: type_name::get<T>(),
     }
 }
 
@@ -656,6 +699,27 @@ public fun get_agent_object_id(registry: &AgentRegistry, agent_id: String): Opti
 
 public fun get_agent_balance<T>(agent: &Agent<T>): u64 {
     balance::value(&agent.balance)
+}
+
+public fun get_attack_count<T>(agent: &Agent<T>): u64 {
+    agent.attack_count
+}
+
+public fun get_effective_cost<T>(agent: &Agent<T>, config: &ProtocolConfig): u64 {
+    // Calculate multiplier: BASE + (attack_count * fee_increase_bps)
+    let raw_multiplier = BASIS_POINTS + (agent.attack_count * config.fee_increase_bps);
+    // Cap at max_fee_multiplier_bps
+    let multiplier = if (raw_multiplier > config.max_fee_multiplier_bps) {
+        config.max_fee_multiplier_bps
+    } else {
+        raw_multiplier
+    };
+    // effective_cost = base_cost * multiplier / BASIS_POINTS
+    (agent.cost_per_message * multiplier) / BASIS_POINTS
+}
+
+public fun get_fee_settings(config: &ProtocolConfig): (u64, u64) {
+    (config.fee_increase_bps, config.max_fee_multiplier_bps)
 }
 
 public fun update_agent_cost<T>(agent: &mut Agent<T>, cap: &AgentCap<T>, new_cost: u64, clock: &Clock, _ctx: &TxContext) {
@@ -722,6 +786,7 @@ public fun withdraw_from_agent<T>(
         agent_id: agent.agent_id,
         amount,
         withdrawn_at: current_time,
+        token_type: type_name::get<T>(),
     });
     coin::from_balance(withdrawn_balance, ctx)
 }
@@ -790,6 +855,8 @@ fun test_register_agent_flow() {
         protocol_fee: DEFAULT_PROTOCOL_FEE,
         admin: @0x101ce8865558e08408b83f60ee9e78843d03d547c850cbe12cb599e17833dd3e,
         whitelisted_tokens: whitelisted_tokens_test,
+        fee_increase_bps: DEFAULT_FEE_INCREASE_BPS,
+        max_fee_multiplier_bps: DEFAULT_MAX_FEE_MULTIPLIER_BPS,
     };
 
     set_canonical_enclave(&mut protocol_config, &enclave, &clock, ctx(&mut scenario));
