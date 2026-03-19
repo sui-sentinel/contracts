@@ -123,4 +123,6 @@ First is register the new enclave
 5. Update `APP_PACKAGE_ID`, `AGENT_REGISTRY`, `PROTOCOL_CONFIG_ID`, `ENCLAVE_CONFIG_OBJECT_ID`, `CAP_OBJECT_ID` from new log file generated in `logs` folder
 6. Update PCRs on-chain using `bun run scripts/script.ts update-pcrs  --network testnet`
 7. Register Enclave using `bun run scripts/script.ts register-enclave --network testnet`
-8. You will get  `ENCLAVE_OBJECT_ID` in response. set it in `testnet.config.json`
+8. You will get `ENCLAVE_OBJECT_ID` in response. set it in `testnet.config.json`
+9. Call `set_canonical_enclave` method of app contract using `bun run scripts/script.ts set-canonical-enclave --network testnet`
+10. set new tokens to whitelist in `TOKENS_TO_WHITELIST` and Call `bun run scripts/script.ts add-whitelisted-tokens --network testnet` to whitelist new tokens
