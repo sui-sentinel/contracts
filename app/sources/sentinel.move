@@ -38,6 +38,7 @@ const EInvalidEnclave: u64 = 14;
 const EInvalidCap: u64 = 15;
 const EExistingWallet: u64 = 16;
 const ETokenNotWhitelisted: u64 = 17;
+const EProtocolPaused: u64 = 19;
 
 // Fee percentage constants (in basis points, 100 = 1%)
 const DEFAULT_AGENT_BALANCE_FEE: u64 = 5000;  // 50%
@@ -48,7 +49,7 @@ const WITHDRAWAL_LOCK_PERIOD_MS: u64 = 1209600000;             // 14 days
 const PROMPT_UPDATE_WINDOW_MS: u64 = 10800000; // 3 hours
 const MAX_TEXT_LENGTH: u64 = 64000;
 const MAX_SIGNATURE_MS: u64 = 60_000;
-const DEFAULT_FEE_INCREASE_BPS: u64 = 500;      // 5% increase per attack
+const DEFAULT_FEE_INCREASE_BPS: u64 = 100;      // 1% increase per attack
 const DEFAULT_MAX_FEE_MULTIPLIER_BPS: u64 = 30000; // 3x max fee cap
 
 public struct Agent<phantom T> has key, store {
@@ -70,7 +71,8 @@ public struct AgentInfo has copy, drop {
     object_id: ID,
     balance: u64,
     accumulated_fees: u64,
-    token_type: TypeName
+    token_type: TypeName,
+    attack_count: u64
 }
 
 public struct AgentRegistry has key {
@@ -90,6 +92,7 @@ public struct ProtocolConfig has key {
     whitelisted_tokens: VecSet<TypeName>,
     fee_increase_bps: u64,
     max_fee_multiplier_bps: u64,
+    is_paused: bool,
 }
 
 public struct SENTINEL has drop {}
@@ -214,6 +217,16 @@ public struct CanonicalEnclaveUpdated has copy, drop {
     timestamp: u64,
 }
 
+public struct ProtocolPaused has copy, drop {
+    paused_by: address,
+    timestamp: u64,
+}
+
+public struct ProtocolUnpaused has copy, drop {
+    unpaused_by: address,
+    timestamp: u64,
+}
+
 fun init(otw: SENTINEL, ctx: &mut TxContext) {
     let cap = enclave::new_cap(otw, ctx);
     cap.create_enclave_config(
@@ -247,6 +260,7 @@ fun init(otw: SENTINEL, ctx: &mut TxContext) {
         whitelisted_tokens,
         fee_increase_bps: DEFAULT_FEE_INCREASE_BPS,
         max_fee_multiplier_bps: DEFAULT_MAX_FEE_MULTIPLIER_BPS,
+        is_paused: false,
     };
     transfer::share_object(protocol_config);
 }
@@ -261,6 +275,7 @@ public fun request_attack<T>(
     clock: &Clock,
     ctx: &mut TxContext
 ): Attack<T> {
+    assert!(!config.is_paused, EProtocolPaused);
     assert!(table::contains(&registry.agents, agent.agent_id), EAgentNotFound);
     let registered_id = *table::borrow(&registry.agents, agent.agent_id);
     assert!(object::id(agent) == registered_id, EAgentNotFound);
@@ -333,6 +348,7 @@ public fun register_agent<T>(
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
+    assert!(!config.is_paused, EProtocolPaused);
     assert!(string::length(&system_prompt) <= MAX_TEXT_LENGTH, ETextTooLong);
     assert!(is_token_whitelisted<T>(config), ETokenNotWhitelisted);
     verify_canonical_enclave(config, enclave);
@@ -441,6 +457,7 @@ public fun consume_prompt<T>(
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
+    assert!(!config.is_paused, EProtocolPaused);
     verify_canonical_enclave(config, enclave);
     let Attack {
         id: attack_object_id,
@@ -585,6 +602,38 @@ public fun update_dynamic_fee_settings(
     config.max_fee_multiplier_bps = max_fee_multiplier_bps;
 }
 
+public fun pause_protocol(
+    config: &mut ProtocolConfig,
+    clock: &Clock,
+    ctx: &TxContext
+) {
+    assert!(ctx.sender() == config.admin, ENotAuthorized);
+    config.is_paused = true;
+
+    event::emit(ProtocolPaused {
+        paused_by: ctx.sender(),
+        timestamp: clock::timestamp_ms(clock),
+    });
+}
+
+public fun unpause_protocol(
+    config: &mut ProtocolConfig,
+    clock: &Clock,
+    ctx: &TxContext
+) {
+    assert!(ctx.sender() == config.admin, ENotAuthorized);
+    config.is_paused = false;
+
+    event::emit(ProtocolUnpaused {
+        unpaused_by: ctx.sender(),
+        timestamp: clock::timestamp_ms(clock),
+    });
+}
+
+public fun is_protocol_paused(config: &ProtocolConfig): bool {
+    config.is_paused
+}
+
 public fun set_canonical_enclave(
     config: &mut ProtocolConfig,
     enclave: &Enclave<SENTINEL>,
@@ -678,6 +727,7 @@ public fun get_agent_info<T>(agent: &Agent<T>): AgentInfo {
         balance: balance::value(&agent.balance),
         accumulated_fees: balance::value(&agent.accumulated_fees),
         token_type: type_name::get<T>(),
+        attack_count: agent.attack_count,
     }
 }
 
@@ -857,6 +907,7 @@ fun test_register_agent_flow() {
         whitelisted_tokens: whitelisted_tokens_test,
         fee_increase_bps: DEFAULT_FEE_INCREASE_BPS,
         max_fee_multiplier_bps: DEFAULT_MAX_FEE_MULTIPLIER_BPS,
+        is_paused: false,
     };
 
     set_canonical_enclave(&mut protocol_config, &enclave, &clock, ctx(&mut scenario));
