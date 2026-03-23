@@ -11,6 +11,11 @@ function getDefaultConfigPath(network: Network): string {
     return path.resolve(__dirname, `${network}.config.json`);
 }
 
+type MinimumTokenAmount = {
+    type: string;
+    minimum_token: number;
+};
+
 type ScriptConfigFile = {
     PCR0: string;
     PCR1: string;
@@ -28,6 +33,7 @@ type ScriptConfigFile = {
     CLOCK_OBJECT_ID: string;
     GAS_BUDGET: number;
     TOKENS_TO_WHITELIST: string[];
+    MINIMUM_TOKEN_AMOUNTS: MinimumTokenAmount[];
 };
 
 function loadConfigFile(configPath: string): ScriptConfigFile {
@@ -45,6 +51,7 @@ Commands:
   set-canonical-enclave
   update-canonical-enclave
   add-whitelisted-tokens
+  set-minimum-token-amounts
   print-config
 
 Common options:
@@ -125,6 +132,7 @@ function getConfig(values: Record<string, unknown>) {
         gasBudget: Number(values['gas-budget'] ?? process.env.GAS_BUDGET ?? fileConfig.GAS_BUDGET),
         attestationHex: values['attestation-hex'] as string | undefined,
         tokensToWhitelist: fileConfig.TOKENS_TO_WHITELIST ?? [],
+        minimumTokenAmounts: fileConfig.MINIMUM_TOKEN_AMOUNTS ?? [],
     };
 }
 
@@ -261,6 +269,30 @@ async function addWhitelistedTokens(config: ReturnType<typeof getConfig>) {
     console.log(JSON.stringify(resp, null, 2));
 }
 
+async function setMinimumTokenAmounts(config: ReturnType<typeof getConfig>) {
+    const tokenAmounts = config.minimumTokenAmounts;
+    if (tokenAmounts.length === 0) {
+        console.log('No minimum token amounts in config.');
+        return;
+    }
+
+    const tx = new Transaction();
+    tx.setGasBudget(config.gasBudget);
+
+    for (const tokenAmount of tokenAmounts) {
+        tx.moveCall({
+            target: `${config.appPackageId}::sentinel::set_minimum_token_amount`,
+            typeArguments: [tokenAmount.type],
+            arguments: [tx.object(config.protocolConfigId), tx.pure.u64(tokenAmount.minimum_token)],
+        });
+        console.log(`Setting minimum token amount for ${tokenAmount.type}: ${tokenAmount.minimum_token}`);
+    }
+
+    const client = await getClient(config.network);
+    const resp = await executeTransaction(client, tx);
+    console.log(JSON.stringify(resp, null, 2));
+}
+
 function printConfig(config: ReturnType<typeof getConfig>) {
     console.log(JSON.stringify(config, null, 2));
 }
@@ -313,6 +345,9 @@ async function main() {
             break;
         case 'add-whitelisted-tokens':
             await addWhitelistedTokens(config);
+            break;
+        case 'set-minimum-token-amounts':
+            await setMinimumTokenAmounts(config);
             break;
         case 'print-config':
             printConfig(config);
