@@ -39,6 +39,7 @@ const EInvalidCap: u64 = 15;
 const EExistingWallet: u64 = 16;
 const ETokenNotWhitelisted: u64 = 17;
 const EProtocolPaused: u64 = 19;
+const EInsufficientInitialFund: u64 = 20;
 
 // Fee percentage constants (in basis points, 100 = 1%)
 const DEFAULT_AGENT_BALANCE_FEE: u64 = 5000;  // 50%
@@ -93,6 +94,7 @@ public struct ProtocolConfig has key {
     fee_increase_bps: u64,
     max_fee_multiplier_bps: u64,
     is_paused: bool,
+    minimum_token_amounts: Table<TypeName, u64>,
 }
 
 public struct SENTINEL has drop {}
@@ -261,6 +263,7 @@ fun init(otw: SENTINEL, ctx: &mut TxContext) {
         fee_increase_bps: DEFAULT_FEE_INCREASE_BPS,
         max_fee_multiplier_bps: DEFAULT_MAX_FEE_MULTIPLIER_BPS,
         is_paused: false,
+        minimum_token_amounts: table::new(ctx),
     };
     transfer::share_object(protocol_config);
 }
@@ -343,6 +346,7 @@ public fun register_agent<T>(
     timestamp_ms: u64,
     cost_per_message: u64,
     system_prompt: String,
+    initial_fund: Coin<T>,
     sig: &vector<u8>,
     enclave: &Enclave<SENTINEL>,
     clock: &Clock,
@@ -351,7 +355,15 @@ public fun register_agent<T>(
     assert!(!config.is_paused, EProtocolPaused);
     assert!(string::length(&system_prompt) <= MAX_TEXT_LENGTH, ETextTooLong);
     assert!(is_token_whitelisted<T>(config), ETokenNotWhitelisted);
+
+    // Verify initial fund meets minimum requirement for token type
+    let initial_amount = coin::value(&initial_fund);
+    let minimum_amount = get_minimum_token_amount<T>(config);
+    assert!(initial_amount >= minimum_amount, EInsufficientInitialFund);
+
     verify_canonical_enclave(config, enclave);
+    // Note: initial_fund amount is NOT included in signature verification
+    // so users don't need to call register_agent with a specific amount
     let res = enclave::verify_signature<SENTINEL, RegisterAgentResponse>(
         enclave,
         SENTINEL_INTENT,
@@ -369,7 +381,7 @@ public fun register_agent<T>(
         agent_id,
         cost_per_message,
         system_prompt,
-        balance: balance::zero<T>(),
+        balance: coin::into_balance(initial_fund),
         accumulated_fees: balance::zero<T>(),
         last_funded_timestamp: current_time,
         created_at: timestamp_ms,
@@ -389,7 +401,7 @@ public fun register_agent<T>(
         agent_id,
         prompt: system_prompt,
         cost_per_message,
-        initial_balance: 0,
+        initial_balance: initial_amount,
         agent_object_id,
         token_type: type_name::get<T>(),
     });
@@ -707,6 +719,42 @@ public fun is_token_whitelisted<T>(config: &ProtocolConfig): bool {
     vec_set::contains(&config.whitelisted_tokens, &type_name::get<T>())
 }
 
+// ==================== Minimum Token Amount Functions ====================
+
+public fun set_minimum_token_amount<T>(
+    config: &mut ProtocolConfig,
+    amount: u64,
+    ctx: &TxContext
+) {
+    assert!(ctx.sender() == config.admin, ENotAuthorized);
+    let token_type = type_name::get<T>();
+    if (table::contains(&config.minimum_token_amounts, token_type)) {
+        *table::borrow_mut(&mut config.minimum_token_amounts, token_type) = amount;
+    } else {
+        table::add(&mut config.minimum_token_amounts, token_type, amount);
+    };
+}
+
+public fun remove_minimum_token_amount<T>(
+    config: &mut ProtocolConfig,
+    ctx: &TxContext
+) {
+    assert!(ctx.sender() == config.admin, ENotAuthorized);
+    let token_type = type_name::get<T>();
+    if (table::contains(&config.minimum_token_amounts, token_type)) {
+        table::remove(&mut config.minimum_token_amounts, token_type);
+    };
+}
+
+public fun get_minimum_token_amount<T>(config: &ProtocolConfig): u64 {
+    let token_type = type_name::get<T>();
+    if (table::contains(&config.minimum_token_amounts, token_type)) {
+        *table::borrow(&config.minimum_token_amounts, token_type)
+    } else {
+        0
+    }
+}
+
 // ==================== View Functions ====================
 
 public fun get_protocol_config(config: &ProtocolConfig): (address, u64, u64, u64) {
@@ -908,17 +956,22 @@ fun test_register_agent_flow() {
         fee_increase_bps: DEFAULT_FEE_INCREASE_BPS,
         max_fee_multiplier_bps: DEFAULT_MAX_FEE_MULTIPLIER_BPS,
         is_paused: false,
+        minimum_token_amounts: table::new(ctx(&mut scenario)),
     };
 
     set_canonical_enclave(&mut protocol_config, &enclave, &clock, ctx(&mut scenario));
 
+    // Create a zero coin for initial fund (no minimum set in test)
+    let initial_fund = coin::zero<SUI>(ctx(&mut scenario));
+
     register_agent<SUI>(
-        &mut registry, 
+        &mut registry,
         &protocol_config,
         agent_id,
         timestamp_ms,
         cost_per_message,
         system_prompt,
+        initial_fund,
         &sig,
         &enclave,
         &clock,
