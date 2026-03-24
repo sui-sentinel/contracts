@@ -158,4 +158,4 @@ BUCK: 20
 8. You will get `ENCLAVE_OBJECT_ID` in response. set it in `testnet.config.json`
 9. Call `set_canonical_enclave` method of app contract using `bun run scripts/script.ts set-canonical-enclave --network testnet`
 10. set new tokens to whitelist in `TOKENS_TO_WHITELIST` and Call `bun run scripts/script.ts add-whitelisted-tokens --network testnet` to whitelist new tokens
-11. set minimum token amounts for `MINIMUM_TOKEN_AMOUNTS` and call `bun tun scripts/script.ts   set-minimum-token-amounts --network testnet`
+11. set minimum token amounts for `MINIMUM_TOKEN_AMOUNTS` and call `bun run scripts/script.ts set-minimum-token-amounts --network testnet`
