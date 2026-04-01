@@ -1,84 +1,99 @@
 #!/usr/bin/env bun
 
 import { spawn } from "bun";
-import { existsSync, writeFileSync, unlinkSync } from "fs";
+import { existsSync, writeFileSync, unlinkSync, readFileSync } from "fs";
 import { join } from "path";
+import { createInterface } from "readline";
+import { AnchorProvider, Program, Wallet, BN } from "@coral-xyz/anchor";
+import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
 
+// IDL import
+import IDL from "../target/idl/sui_sentinel.json";
+
 const NETWORK_URLS: Record<string, string> = {
-  testnet: "https://api.testnet.solana.com",
   devnet: "https://api.devnet.solana.com",
+  testnet: "https://api.testnet.solana.com",
   mainnet: "https://api.mainnet-beta.solana.com",
 };
 
+type NetworkType = "devnet" | "testnet" | "mainnet";
 
-interface Args {
-  network: "testnet" | "devnet" | "mainnet";
-  build: boolean;
-  deploy: boolean;
-  help: boolean;
+interface Config {
+  network: NetworkType;
+  programId: string;
+  rpcUrl: string;
+  keypair: Keypair;
 }
 
-function parseArgs(): Args {
-  const args: Args = {
-    network: "devnet",
-    build: false,
-    deploy: false,
-    help: false,
-  };
+const rl = createInterface({
+  input: process.stdin,
+  output: process.stdout,
+});
 
-  const argv = process.argv.slice(2);
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === "--network" || arg === "-n") {
-      const value = argv[++i];
-      if (!value || !["testnet", "devnet", "mainnet"].includes(value)) {
-        console.error(
-          "Error: --network must be one of: testnet, devnet, mainnet"
-        );
-        process.exit(1);
-      }
-      args.network = value as Args["network"];
-    } else if (arg === "--build" || arg === "-b") {
-      args.build = true;
-    } else if (arg === "--deploy" || arg === "-d") {
-      args.deploy = true;
-    } else if (arg === "--help" || arg === "-h") {
-      args.help = true;
+function question(prompt: string): Promise<string> {
+  return new Promise((resolve) => {
+    rl.question(prompt, (answer) => {
+      resolve(answer.trim());
+    });
+  });
+}
+
+async function selectOption(prompt: string, options: string[]): Promise<number> {
+  console.log(`\n${prompt}`);
+  options.forEach((opt, i) => console.log(`  ${i + 1}. ${opt}`));
+
+  while (true) {
+    const answer = await question(`\nSelect (1-${options.length}): `);
+    const num = parseInt(answer);
+    if (num >= 1 && num <= options.length) {
+      return num - 1;
     }
+    console.log("Invalid selection. Please try again.");
+  }
+}
+
+function getProgramIdEnvKey(network: NetworkType): string {
+  return `${network.toUpperCase()}_PROGRAM_ID`;
+}
+
+function loadConfig(network: NetworkType): Config {
+  const privateKey = process.env.ADMIN_PRIVATE_KEY;
+  if (!privateKey) {
+    console.error("Error: ADMIN_PRIVATE_KEY not set in .env.local");
+    process.exit(1);
   }
 
-  return args;
+  const programIdKey = getProgramIdEnvKey(network);
+  const programId = process.env[programIdKey];
+  if (!programId) {
+    console.error(`Error: ${programIdKey} not set in .env.local`);
+    process.exit(1);
+  }
+
+  const keypair = Keypair.fromSecretKey(bs58.decode(privateKey));
+
+  return {
+    network,
+    programId,
+    rpcUrl: NETWORK_URLS[network],
+    keypair,
+  };
 }
 
-function showHelp(): void {
-  console.log(`
-Sui Sentinel Solana CLI
+function getProgram(config: Config): Program {
+  const connection = new Connection(config.rpcUrl, "confirmed");
+  const wallet = new Wallet(config.keypair);
+  const provider = new AnchorProvider(connection, wallet, {
+    commitment: "confirmed",
+  });
 
-Usage:
-  bun run scripts/cli.ts [options]
-
-Options:
-  -n, --network <network>  Target network (testnet, devnet, mainnet) [default: devnet]
-  -b, --build              Build the program before deploying
-  -d, --deploy             Deploy the program to the specified network
-  -h, --help               Show this help message
-
-Examples:
-  bun run scripts/cli.ts --network testnet --build --deploy
-  bun run scripts/cli.ts -n mainnet -d
-  bun run scripts/cli.ts --build
-
-Environment Variables (from .env.local):
-  ADMIN_ADDRESS            Phantom wallet address (for verification)
-  ADMIN_PRIVATE_KEY        Phantom wallet private key (base58 encoded)
-`);
+  return new Program(IDL as any, provider);
 }
 
 async function runCommand(
   command: string,
-  args: string[],
-  env?: Record<string, string>
+  args: string[]
 ): Promise<{ success: boolean; output: string }> {
   console.log(`\n> ${command} ${args.join(" ")}\n`);
 
@@ -86,7 +101,7 @@ async function runCommand(
     cmd: [command, ...args],
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, ...env },
+    env: process.env,
   });
 
   const stdout = await new Response(proc.stdout).text();
@@ -96,175 +111,422 @@ async function runCommand(
   if (stdout) console.log(stdout);
   if (stderr) console.error(stderr);
 
-  return {
-    success: exitCode === 0,
-    output: stdout + stderr,
-  };
+  return { success: exitCode === 0, output: stdout + stderr };
 }
 
-function loadEnv(): { address: string; privateKey: string } {
-  const address = process.env.ADMIN_ADDRESS;
+// ============================================================================
+// Deploy Operation
+// ============================================================================
+
+async function deployProgram(network: NetworkType): Promise<void> {
   const privateKey = process.env.ADMIN_PRIVATE_KEY;
-
-  if (!address || !privateKey) {
-    console.error("Error: ADMIN_ADDRESS and ADMIN_PRIVATE_KEY must be set in .env.local");
-    process.exit(1);
+  if (!privateKey) {
+    console.error("Error: ADMIN_PRIVATE_KEY not set in .env.local");
+    return;
   }
 
-  return { address, privateKey };
-}
-
-async function createKeypairFile(privateKeyBase58: string): Promise<string> {
   const keypairPath = join(import.meta.dir, "..", ".keypair.json");
+  const programPath = join(import.meta.dir, "..", "target", "deploy", "sui_sentinel.so");
+  const programKeypairPath = join(import.meta.dir, "..", "target", "deploy", "sui_sentinel-keypair.json");
 
   try {
-    const privateKeyBytes = bs58.decode(privateKeyBase58);
-    const keypairArray = Array.from(privateKeyBytes);
-    writeFileSync(keypairPath, JSON.stringify(keypairArray));
-    return keypairPath;
-  } catch (error) {
-    console.error("Error: Invalid private key format");
-    process.exit(1);
-  }
-}
+    // Create temp keypair file
+    const keypairBytes = bs58.decode(privateKey);
+    writeFileSync(keypairPath, JSON.stringify(Array.from(keypairBytes)));
 
-async function buildProgram(): Promise<boolean> {
-  console.log("\n========================================");
-  console.log("Building Sui Sentinel program...");
-  console.log("========================================");
-
-  const result = await runCommand("anchor", ["build"]);
-  return result.success;
-}
-
-async function deployProgram(
-  network: string,
-  keypairPath: string
-): Promise<boolean> {
-  const rpcUrl = NETWORK_URLS[network];
-
-  console.log("\n========================================");
-  console.log(`Deploying to ${network}...`);
-  console.log(`RPC URL: ${rpcUrl}`);
-  console.log("========================================");
-
-  // Check balance first
-  console.log("\nChecking wallet balance...");
-  const balanceResult = await runCommand("solana", [
-    "balance",
-    "--url",
-    rpcUrl,
-    "--keypair",
-    keypairPath,
-  ]);
-
-  if (!balanceResult.success) {
-    console.error("Failed to check balance");
-    return false;
-  }
-
-  // Deploy the program
-  const programPath = join(
-    import.meta.dir,
-    "..",
-    "target",
-    "deploy",
-    "sui_sentinel.so"
-  );
-
-  const programKeypairPath = join(
-    import.meta.dir,
-    "..",
-    "target",
-    "deploy",
-    "sui_sentinel-keypair.json"
-  );
-
-  if (!existsSync(programPath)) {
-    console.error(`\nError: Program binary not found at ${programPath}`);
-    console.error("Run with --build flag to build the program first");
-    return false;
-  }
-
-  if (!existsSync(programKeypairPath)) {
-    console.error(`\nError: Program keypair not found at ${programKeypairPath}`);
-    console.error("Run with --build flag to generate the program keypair");
-    return false;
-  }
-
-  console.log("\nDeploying program...");
-  const deployResult = await runCommand("solana", [
-    "program",
-    "deploy",
-    programPath,
-    "--url",
-    rpcUrl,
-    "--keypair",
-    keypairPath,
-    "--program-id",
-    programKeypairPath,
-  ]);
-
-  return deployResult.success;
-}
-
-async function main(): Promise<void> {
-  const args = parseArgs();
-
-  if (args.help) {
-    showHelp();
-    process.exit(0);
-  }
-
-  if (!args.build && !args.deploy) {
-    console.log("No action specified. Use --build and/or --deploy");
-    console.log("Run with --help for more information");
-    process.exit(1);
-  }
-
-  console.log("\n========================================");
-  console.log("Sui Sentinel Solana Deployment CLI");
-  console.log("========================================");
-  console.log(`Network: ${args.network}`);
-
-  let keypairPath: string | null = null;
-
-  if (args.deploy) {
-    const { address, privateKey } = loadEnv();
-    console.log(`Admin Address: ${address}`);
-    keypairPath = await createKeypairFile(privateKey);
-  }
-
-  try {
-    if (args.build) {
-      const buildSuccess = await buildProgram();
-      if (!buildSuccess) {
-        console.error("\nBuild failed!");
-        process.exit(1);
+    // Check if program is built
+    if (!existsSync(programPath)) {
+      console.log("\nProgram not built. Building now...");
+      const buildResult = await runCommand("anchor", ["build"]);
+      if (!buildResult.success) {
+        console.error("Build failed!");
+        return;
       }
-      console.log("\nBuild successful!");
     }
 
-    if (args.deploy && keypairPath) {
-      const deploySuccess = await deployProgram(args.network, keypairPath);
-      if (!deploySuccess) {
-        console.error("\nDeployment failed!");
-        process.exit(1);
-      }
-      console.log("\nDeployment successful!");
-      console.log(`Program deployed to ${args.network}`);
+    // Check balance
+    const rpcUrl = NETWORK_URLS[network];
+    console.log(`\nDeploying to ${network}...`);
+    console.log(`RPC URL: ${rpcUrl}`);
+
+    await runCommand("solana", ["balance", "--url", rpcUrl, "--keypair", keypairPath]);
+
+    // Deploy
+    const deployResult = await runCommand("solana", [
+      "program", "deploy", programPath,
+      "--url", rpcUrl,
+      "--keypair", keypairPath,
+      "--program-id", programKeypairPath,
+    ]);
+
+    if (deployResult.success) {
+      // Get program ID from keypair
+      const programKeypairData = JSON.parse(readFileSync(programKeypairPath, "utf-8"));
+      const programKeypair = Keypair.fromSecretKey(Uint8Array.from(programKeypairData));
+      console.log(`\nDeployment successful!`);
+      console.log(`Program ID: ${programKeypair.publicKey.toBase58()}`);
+      console.log(`\nAdd this to your .env.local:`);
+      console.log(`${getProgramIdEnvKey(network)}=${programKeypair.publicKey.toBase58()}`);
     }
   } finally {
-    // Clean up keypair file
-    if (keypairPath && existsSync(keypairPath)) {
+    if (existsSync(keypairPath)) {
       unlinkSync(keypairPath);
     }
   }
+}
 
-  console.log("\nDone!");
+// ============================================================================
+// Admin Operations
+// ============================================================================
+
+async function initialize(config: Config): Promise<void> {
+  const program = getProgram(config);
+
+  const protocolWalletInput = await question("Protocol Wallet Address: ");
+  const protocolWallet = new PublicKey(protocolWalletInput);
+
+  console.log("\nInitializing protocol...");
+  try {
+    const tx = await program.methods
+      .initialize(protocolWallet)
+      .accounts({
+        admin: config.keypair.publicKey,
+      })
+      .rpc();
+    console.log(`Transaction: ${tx}`);
+    console.log("Protocol initialized successfully!");
+  } catch (e: any) {
+    console.error("Error:", e.message);
+  }
+}
+
+async function setEnclavePubkey(config: Config): Promise<void> {
+  const program = getProgram(config);
+
+  const pubkeyHex = await question("Enclave Public Key (64 hex chars or base58): ");
+
+  let pubkeyBytes: number[];
+  if (pubkeyHex.length === 64) {
+    // Hex format
+    pubkeyBytes = Array.from(Buffer.from(pubkeyHex, "hex"));
+  } else {
+    // Try base58
+    try {
+      pubkeyBytes = Array.from(bs58.decode(pubkeyHex));
+    } catch {
+      console.error("Invalid public key format. Use 64 hex chars or base58.");
+      return;
+    }
+  }
+
+  if (pubkeyBytes.length !== 32) {
+    console.error("Public key must be 32 bytes");
+    return;
+  }
+
+  console.log("\nSetting enclave public key...");
+  try {
+    const tx = await program.methods
+      .setEnclavePubkey(pubkeyBytes)
+      .accounts({
+        admin: config.keypair.publicKey,
+      })
+      .rpc();
+    console.log(`Transaction: ${tx}`);
+    console.log("Enclave public key set successfully!");
+  } catch (e: any) {
+    console.error("Error:", e.message);
+  }
+}
+
+async function updateEnclavePubkey(config: Config): Promise<void> {
+  const program = getProgram(config);
+
+  const pubkeyHex = await question("New Enclave Public Key (64 hex chars or base58): ");
+
+  let pubkeyBytes: number[];
+  if (pubkeyHex.length === 64) {
+    pubkeyBytes = Array.from(Buffer.from(pubkeyHex, "hex"));
+  } else {
+    try {
+      pubkeyBytes = Array.from(bs58.decode(pubkeyHex));
+    } catch {
+      console.error("Invalid public key format.");
+      return;
+    }
+  }
+
+  if (pubkeyBytes.length !== 32) {
+    console.error("Public key must be 32 bytes");
+    return;
+  }
+
+  console.log("\nUpdating enclave public key...");
+  try {
+    const tx = await program.methods
+      .updateEnclavePubkey(pubkeyBytes)
+      .accounts({
+        admin: config.keypair.publicKey,
+      })
+      .rpc();
+    console.log(`Transaction: ${tx}`);
+    console.log("Enclave public key updated successfully!");
+  } catch (e: any) {
+    console.error("Error:", e.message);
+  }
+}
+
+async function updateFeeRatios(config: Config): Promise<void> {
+  const program = getProgram(config);
+
+  console.log("\nFee ratios are in basis points (100 = 1%, 10000 = 100%)");
+  console.log("Total must equal 10000 (100%)");
+
+  const agentBalanceFee = await question("Agent Balance Fee (default 5000 = 50%): ");
+  const creatorFee = await question("Creator Fee (default 4000 = 40%): ");
+  const protocolFee = await question("Protocol Fee (default 1000 = 10%): ");
+
+  const agentBps = new BN(agentBalanceFee || "5000");
+  const creatorBps = new BN(creatorFee || "4000");
+  const protocolBps = new BN(protocolFee || "1000");
+
+  console.log("\nUpdating fee ratios...");
+  try {
+    const tx = await program.methods
+      .updateFeeRatios(agentBps, creatorBps, protocolBps)
+      .accounts({
+        admin: config.keypair.publicKey,
+      })
+      .rpc();
+    console.log(`Transaction: ${tx}`);
+    console.log("Fee ratios updated successfully!");
+  } catch (e: any) {
+    console.error("Error:", e.message);
+  }
+}
+
+async function updateProtocolWallet(config: Config): Promise<void> {
+  const program = getProgram(config);
+
+  const newWallet = await question("New Protocol Wallet Address: ");
+
+  console.log("\nUpdating protocol wallet...");
+  try {
+    const tx = await program.methods
+      .updateProtocolWallet(new PublicKey(newWallet))
+      .accounts({
+        admin: config.keypair.publicKey,
+      })
+      .rpc();
+    console.log(`Transaction: ${tx}`);
+    console.log("Protocol wallet updated successfully!");
+  } catch (e: any) {
+    console.error("Error:", e.message);
+  }
+}
+
+async function transferAdmin(config: Config): Promise<void> {
+  const program = getProgram(config);
+
+  const newAdmin = await question("New Admin Address: ");
+
+  const confirm = await question(`Transfer admin to ${newAdmin}? (yes/no): `);
+  if (confirm.toLowerCase() !== "yes") {
+    console.log("Cancelled.");
+    return;
+  }
+
+  console.log("\nTransferring admin role...");
+  try {
+    const tx = await program.methods
+      .transferAdmin(new PublicKey(newAdmin))
+      .accounts({
+        admin: config.keypair.publicKey,
+      })
+      .rpc();
+    console.log(`Transaction: ${tx}`);
+    console.log("Admin role transferred successfully!");
+  } catch (e: any) {
+    console.error("Error:", e.message);
+  }
+}
+
+async function updateDynamicFeeSettings(config: Config): Promise<void> {
+  const program = getProgram(config);
+
+  console.log("\nDynamic fee settings (in basis points)");
+
+  const feeIncrease = await question("Fee Increase per Attack (default 100 = 1%): ");
+  const maxMultiplier = await question("Max Fee Multiplier (default 30000 = 3x): ");
+
+  const feeIncreaseBps = new BN(feeIncrease || "100");
+  const maxMultiplierBps = new BN(maxMultiplier || "30000");
+
+  console.log("\nUpdating dynamic fee settings...");
+  try {
+    const tx = await program.methods
+      .updateDynamicFeeSettings(feeIncreaseBps, maxMultiplierBps)
+      .accounts({
+        admin: config.keypair.publicKey,
+      })
+      .rpc();
+    console.log(`Transaction: ${tx}`);
+    console.log("Dynamic fee settings updated successfully!");
+  } catch (e: any) {
+    console.error("Error:", e.message);
+  }
+}
+
+async function pauseProtocol(config: Config): Promise<void> {
+  const program = getProgram(config);
+
+  const confirm = await question("Pause the protocol? (yes/no): ");
+  if (confirm.toLowerCase() !== "yes") {
+    console.log("Cancelled.");
+    return;
+  }
+
+  console.log("\nPausing protocol...");
+  try {
+    const tx = await program.methods
+      .pauseProtocol()
+      .accounts({
+        admin: config.keypair.publicKey,
+      })
+      .rpc();
+    console.log(`Transaction: ${tx}`);
+    console.log("Protocol paused successfully!");
+  } catch (e: any) {
+    console.error("Error:", e.message);
+  }
+}
+
+async function unpauseProtocol(config: Config): Promise<void> {
+  const program = getProgram(config);
+
+  console.log("\nUnpausing protocol...");
+  try {
+    const tx = await program.methods
+      .unpauseProtocol()
+      .accounts({
+        admin: config.keypair.publicKey,
+      })
+      .rpc();
+    console.log(`Transaction: ${tx}`);
+    console.log("Protocol unpaused successfully!");
+  } catch (e: any) {
+    console.error("Error:", e.message);
+  }
+}
+
+// ============================================================================
+// View Operations
+// ============================================================================
+
+async function viewProtocolConfig(config: Config): Promise<void> {
+  const program = getProgram(config);
+
+  console.log("\nFetching protocol config...");
+  try {
+    const [protocolConfigPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("protocol_config")],
+      new PublicKey(config.programId)
+    );
+
+    const protocolConfig = await program.account.protocolConfig.fetch(protocolConfigPda);
+
+    console.log("\n========================================");
+    console.log("Protocol Configuration");
+    console.log("========================================");
+    console.log(`Admin: ${protocolConfig.admin.toBase58()}`);
+    console.log(`Protocol Wallet: ${protocolConfig.protocolWallet.toBase58()}`);
+    console.log(`Agent Balance Fee: ${protocolConfig.agentBalanceFee.toString()} bps`);
+    console.log(`Creator Fee: ${protocolConfig.creatorFee.toString()} bps`);
+    console.log(`Protocol Fee: ${protocolConfig.protocolFee.toString()} bps`);
+    console.log(`Fee Increase per Attack: ${protocolConfig.feeIncreaseBps.toString()} bps`);
+    console.log(`Max Fee Multiplier: ${protocolConfig.maxFeeMultiplierBps.toString()} bps`);
+    console.log(`Is Paused: ${protocolConfig.isPaused}`);
+    console.log(`Total Agents: ${protocolConfig.totalAgents.toString()}`);
+
+    if (protocolConfig.enclavePubkey) {
+      const pubkeyHex = Buffer.from(protocolConfig.enclavePubkey).toString("hex");
+      console.log(`Enclave Pubkey: ${pubkeyHex}`);
+    } else {
+      console.log(`Enclave Pubkey: Not set`);
+    }
+  } catch (e: any) {
+    console.error("Error:", e.message);
+  }
+}
+
+// ============================================================================
+// Main Menu
+// ============================================================================
+
+const OPERATIONS = [
+  { name: "Deploy Program", fn: null, requiresProgramId: false },
+  { name: "Initialize Protocol", fn: initialize, requiresProgramId: true },
+  { name: "Set Enclave Public Key", fn: setEnclavePubkey, requiresProgramId: true },
+  { name: "Update Enclave Public Key", fn: updateEnclavePubkey, requiresProgramId: true },
+  { name: "Update Fee Ratios", fn: updateFeeRatios, requiresProgramId: true },
+  { name: "Update Protocol Wallet", fn: updateProtocolWallet, requiresProgramId: true },
+  { name: "Transfer Admin", fn: transferAdmin, requiresProgramId: true },
+  { name: "Update Dynamic Fee Settings", fn: updateDynamicFeeSettings, requiresProgramId: true },
+  { name: "Pause Protocol", fn: pauseProtocol, requiresProgramId: true },
+  { name: "Unpause Protocol", fn: unpauseProtocol, requiresProgramId: true },
+  { name: "View Protocol Config", fn: viewProtocolConfig, requiresProgramId: true },
+  { name: "Exit", fn: null, requiresProgramId: false },
+];
+
+async function main(): Promise<void> {
+  console.log("\n========================================");
+  console.log("  Sui Sentinel Solana CLI");
+  console.log("========================================");
+
+  // Select network
+  const networkIndex = await selectOption("Select Network:", ["devnet", "testnet", "mainnet"]);
+  const network = ["devnet", "testnet", "mainnet"][networkIndex] as NetworkType;
+
+  console.log(`\nSelected network: ${network}`);
+  console.log(`Admin: ${process.env.ADMIN_ADDRESS || "Not set"}`);
+
+  while (true) {
+    const opIndex = await selectOption(
+      "Select Operation:",
+      OPERATIONS.map((op) => op.name)
+    );
+
+    const operation = OPERATIONS[opIndex];
+
+    if (operation.name === "Exit") {
+      console.log("\nGoodbye!");
+      break;
+    }
+
+    if (operation.name === "Deploy Program") {
+      await deployProgram(network);
+      continue;
+    }
+
+    if (operation.requiresProgramId) {
+      try {
+        const config = loadConfig(network);
+        console.log(`\nProgram ID: ${config.programId}`);
+
+        if (operation.fn) {
+          await operation.fn(config);
+        }
+      } catch (e: any) {
+        console.error("Error:", e.message);
+      }
+    }
+  }
+
+  rl.close();
 }
 
 main().catch((error) => {
   console.error("Error:", error);
+  rl.close();
   process.exit(1);
 });
