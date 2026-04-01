@@ -1,10 +1,10 @@
+use crate::errors::SentinelError;
+use crate::SIGNATURE_MAX_AGE;
 use anchor_lang::prelude::*;
 use solana_program::ed25519_program;
 use solana_program::sysvar::instructions::{
     load_current_index_checked, load_instruction_at_checked,
 };
-use crate::errors::SentinelError;
-use crate::SIGNATURE_MAX_AGE;
 
 /// Verify an Ed25519 signature using the native Ed25519 program
 ///
@@ -106,17 +106,11 @@ pub fn verify_ed25519_signature(
 
     // Extract and verify public key
     let pubkey = &ix_data[pubkey_offset..pubkey_offset + 32];
-    require!(
-        pubkey == expected_pubkey,
-        SentinelError::InvalidSignature
-    );
+    require!(pubkey == expected_pubkey, SentinelError::InvalidSignature);
 
     // Extract and verify message
     let message = &ix_data[message_offset..message_offset + message_size];
-    require!(
-        message == expected_message,
-        SentinelError::InvalidSignature
-    );
+    require!(message == expected_message, SentinelError::InvalidSignature);
 
     // If we get here, the Ed25519 program has verified the signature
     // and we've confirmed the parameters match our expectations
@@ -178,17 +172,14 @@ mod tests {
         let prompt_hash = [0u8; 32];
         let creator = Pubkey::new_unique();
 
-        let message = build_register_agent_message(
-            intent,
-            timestamp,
-            agent_id,
-            cost,
-            &prompt_hash,
-            &creator,
-        );
+        let message =
+            build_register_agent_message(intent, timestamp, agent_id, cost, &prompt_hash, &creator);
 
         assert_eq!(message[0], intent);
-        assert_eq!(i64::from_le_bytes(message[1..9].try_into().unwrap()), timestamp);
+        assert_eq!(
+            i64::from_le_bytes(message[1..9].try_into().unwrap()),
+            timestamp
+        );
     }
 
     #[test]
@@ -214,6 +205,9 @@ mod tests {
         );
 
         assert_eq!(message[0], intent);
-        assert_eq!(i64::from_le_bytes(message[1..9].try_into().unwrap()), timestamp);
+        assert_eq!(
+            i64::from_le_bytes(message[1..9].try_into().unwrap()),
+            timestamp
+        );
     }
 }

@@ -1,12 +1,10 @@
+use super::signature::verify_ed25519_signature;
+use crate::{
+    errors::SentinelError, events::*, ClaimFees, FundAgent, RegisterAgent, UpdateAgent,
+    WithdrawFromAgent, SENTINEL_INTENT, UPDATE_WINDOW, WITHDRAWAL_LOCK_PERIOD,
+};
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Transfer};
-use crate::{
-    errors::SentinelError,
-    events::*,
-    RegisterAgent, FundAgent, UpdateAgent, ClaimFees, WithdrawFromAgent,
-    SENTINEL_INTENT, UPDATE_WINDOW, WITHDRAWAL_LOCK_PERIOD,
-};
-use super::signature::verify_ed25519_signature;
 
 /// Register a new agent with enclave signature verification
 pub fn register_agent(
@@ -19,14 +17,16 @@ pub fn register_agent(
 ) -> Result<()> {
     // Validate input lengths
     require!(agent_id.len() <= 64, SentinelError::AgentIdTooLong);
-    require!(system_prompt.len() <= 2048, SentinelError::SystemPromptTooLong);
+    require!(
+        system_prompt.len() <= 2048,
+        SentinelError::SystemPromptTooLong
+    );
 
     let clock = Clock::get()?;
     let config = &ctx.accounts.protocol_config;
 
     // Get the enclave public key
-    let enclave_pubkey = config.enclave_pubkey
-        .ok_or(SentinelError::EnclaveNotSet)?;
+    let enclave_pubkey = config.enclave_pubkey.ok_or(SentinelError::EnclaveNotSet)?;
 
     // Build the message to verify
     // Message format: intent || timestamp || agent_id || cost_per_message || system_prompt_hash || creator
@@ -83,10 +83,7 @@ pub fn register_agent(
 }
 
 /// Fund an agent's reward pool
-pub fn fund_agent(
-    ctx: Context<FundAgent>,
-    amount: u64,
-) -> Result<()> {
+pub fn fund_agent(ctx: Context<FundAgent>, amount: u64) -> Result<()> {
     let clock = Clock::get()?;
 
     // Capture keys before mutable borrow
@@ -121,10 +118,7 @@ pub fn fund_agent(
 }
 
 /// Update agent cost (within 3 hour window)
-pub fn update_agent_cost(
-    ctx: Context<UpdateAgent>,
-    new_cost: u64,
-) -> Result<()> {
+pub fn update_agent_cost(ctx: Context<UpdateAgent>, new_cost: u64) -> Result<()> {
     let clock = Clock::get()?;
 
     // Capture keys before mutable borrow
@@ -154,10 +148,7 @@ pub fn update_agent_cost(
 }
 
 /// Update agent system prompt (within 3 hour window)
-pub fn update_agent_prompt(
-    ctx: Context<UpdateAgent>,
-    new_prompt: String,
-) -> Result<()> {
+pub fn update_agent_prompt(ctx: Context<UpdateAgent>, new_prompt: String) -> Result<()> {
     let clock = Clock::get()?;
 
     // Validate prompt length
@@ -205,11 +196,7 @@ pub fn claim_fees(ctx: Context<ClaimFees>) -> Result<()> {
     // Create signer seeds for the agent PDA
     let agent_id_bytes = agent.agent_id.as_bytes();
     let bump = agent.bump;
-    let seeds = &[
-        b"agent".as_ref(),
-        agent_id_bytes,
-        &[bump],
-    ];
+    let seeds = &[b"agent".as_ref(), agent_id_bytes, &[bump]];
     let signer_seeds = &[&seeds[..]];
 
     // Transfer fees to owner
@@ -234,10 +221,7 @@ pub fn claim_fees(ctx: Context<ClaimFees>) -> Result<()> {
 }
 
 /// Withdraw from agent balance (after lock period)
-pub fn withdraw_from_agent(
-    ctx: Context<WithdrawFromAgent>,
-    amount: u64,
-) -> Result<()> {
+pub fn withdraw_from_agent(ctx: Context<WithdrawFromAgent>, amount: u64) -> Result<()> {
     let clock = Clock::get()?;
     let agent = &ctx.accounts.agent;
 
@@ -261,11 +245,7 @@ pub fn withdraw_from_agent(
     // Create signer seeds for the agent PDA
     let agent_id_bytes = agent.agent_id.as_bytes();
     let bump = agent.bump;
-    let seeds = &[
-        b"agent".as_ref(),
-        agent_id_bytes,
-        &[bump],
-    ];
+    let seeds = &[b"agent".as_ref(), agent_id_bytes, &[bump]];
     let signer_seeds = &[&seeds[..]];
 
     // Transfer from agent vault to owner

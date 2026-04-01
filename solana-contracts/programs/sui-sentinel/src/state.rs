@@ -127,8 +127,8 @@ impl ProtocolConfig {
 impl Agent {
     /// Calculate effective cost with dynamic fee multiplier
     pub fn calculate_effective_cost(&self, config: &ProtocolConfig) -> u64 {
-        let raw_multiplier = 10000u64
-            .saturating_add(self.attack_count.saturating_mul(config.fee_increase_bps));
+        let raw_multiplier =
+            10000u64.saturating_add(self.attack_count.saturating_mul(config.fee_increase_bps));
 
         let multiplier = raw_multiplier.min(config.max_fee_multiplier_bps);
 

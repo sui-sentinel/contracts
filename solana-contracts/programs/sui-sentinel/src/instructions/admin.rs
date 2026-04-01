@@ -1,17 +1,12 @@
-use anchor_lang::prelude::*;
 use crate::{
-    errors::SentinelError,
-    events::*,
-    Initialize, AdminOnly,
-    DEFAULT_AGENT_BALANCE_FEE, DEFAULT_CREATOR_FEE, DEFAULT_PROTOCOL_FEE,
-    DEFAULT_FEE_INCREASE_BPS, DEFAULT_MAX_FEE_MULTIPLIER_BPS,
+    errors::SentinelError, events::*, AdminOnly, Initialize, DEFAULT_AGENT_BALANCE_FEE,
+    DEFAULT_CREATOR_FEE, DEFAULT_FEE_INCREASE_BPS, DEFAULT_MAX_FEE_MULTIPLIER_BPS,
+    DEFAULT_PROTOCOL_FEE,
 };
+use anchor_lang::prelude::*;
 
 /// Initialize the protocol configuration
-pub fn initialize(
-    ctx: Context<Initialize>,
-    protocol_wallet: Pubkey,
-) -> Result<()> {
+pub fn initialize(ctx: Context<Initialize>, protocol_wallet: Pubkey) -> Result<()> {
     let config = &mut ctx.accounts.protocol_config;
     let clock = Clock::get()?;
 
@@ -38,10 +33,7 @@ pub fn initialize(
 }
 
 /// Set the canonical enclave public key (one-time)
-pub fn set_enclave_pubkey(
-    ctx: Context<AdminOnly>,
-    enclave_pubkey: [u8; 32],
-) -> Result<()> {
+pub fn set_enclave_pubkey(ctx: Context<AdminOnly>, enclave_pubkey: [u8; 32]) -> Result<()> {
     let config = &mut ctx.accounts.protocol_config;
     let clock = Clock::get()?;
 
@@ -61,15 +53,11 @@ pub fn set_enclave_pubkey(
 }
 
 /// Update the canonical enclave public key
-pub fn update_enclave_pubkey(
-    ctx: Context<AdminOnly>,
-    new_enclave_pubkey: [u8; 32],
-) -> Result<()> {
+pub fn update_enclave_pubkey(ctx: Context<AdminOnly>, new_enclave_pubkey: [u8; 32]) -> Result<()> {
     let config = &mut ctx.accounts.protocol_config;
     let clock = Clock::get()?;
 
-    let old_enclave_pubkey = config.enclave_pubkey
-        .ok_or(SentinelError::EnclaveNotSet)?;
+    let old_enclave_pubkey = config.enclave_pubkey.ok_or(SentinelError::EnclaveNotSet)?;
 
     config.enclave_pubkey = Some(new_enclave_pubkey);
 
@@ -113,10 +101,7 @@ pub fn update_fee_ratios(
 }
 
 /// Update the protocol wallet address
-pub fn update_protocol_wallet(
-    ctx: Context<AdminOnly>,
-    new_wallet: Pubkey,
-) -> Result<()> {
+pub fn update_protocol_wallet(ctx: Context<AdminOnly>, new_wallet: Pubkey) -> Result<()> {
     let config = &mut ctx.accounts.protocol_config;
     let clock = Clock::get()?;
 
@@ -133,10 +118,7 @@ pub fn update_protocol_wallet(
 }
 
 /// Transfer admin role to a new address
-pub fn transfer_admin(
-    ctx: Context<AdminOnly>,
-    new_admin: Pubkey,
-) -> Result<()> {
+pub fn transfer_admin(ctx: Context<AdminOnly>, new_admin: Pubkey) -> Result<()> {
     let config = &mut ctx.accounts.protocol_config;
     let clock = Clock::get()?;
 

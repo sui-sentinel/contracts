@@ -3,31 +3,31 @@ use anchor_spl::token::{Mint, Token, TokenAccount};
 
 declare_id!("2pdFb495RGrbwiRJdin7aRmfsX4puTnoQGb7Rdd7sGDS");
 
-pub mod state;
 pub mod errors;
 pub mod events;
 pub mod instructions;
+pub mod state;
 
-pub use state::*;
 pub use errors::*;
 pub use events::*;
+pub use state::*;
 
 /// Basis points constant (100% = 10000)
 pub const BASIS_POINTS: u64 = 10000;
 
 /// Default fee percentages in basis points
 pub const DEFAULT_AGENT_BALANCE_FEE: u64 = 5000; // 50%
-pub const DEFAULT_CREATOR_FEE: u64 = 4000;       // 40%
-pub const DEFAULT_PROTOCOL_FEE: u64 = 1000;      // 10%
+pub const DEFAULT_CREATOR_FEE: u64 = 4000; // 40%
+pub const DEFAULT_PROTOCOL_FEE: u64 = 1000; // 10%
 
 /// Default dynamic fee settings
-pub const DEFAULT_FEE_INCREASE_BPS: u64 = 100;       // 1% per attack
+pub const DEFAULT_FEE_INCREASE_BPS: u64 = 100; // 1% per attack
 pub const DEFAULT_MAX_FEE_MULTIPLIER_BPS: u64 = 30000; // 3x max
 
 /// Time constants
 pub const WITHDRAWAL_LOCK_PERIOD: i64 = 14 * 24 * 60 * 60; // 14 days in seconds
-pub const UPDATE_WINDOW: i64 = 3 * 60 * 60;                 // 3 hours in seconds
-pub const SIGNATURE_MAX_AGE: i64 = 60;                      // 60 seconds
+pub const UPDATE_WINDOW: i64 = 3 * 60 * 60; // 3 hours in seconds
+pub const SIGNATURE_MAX_AGE: i64 = 180; // 180 seconds
 
 /// Intent scopes for signature verification
 pub const SENTINEL_INTENT: u8 = 1;
@@ -38,18 +38,12 @@ pub mod sui_sentinel {
     use super::*;
 
     /// Initialize the protocol configuration
-    pub fn initialize(
-        ctx: Context<Initialize>,
-        protocol_wallet: Pubkey,
-    ) -> Result<()> {
+    pub fn initialize(ctx: Context<Initialize>, protocol_wallet: Pubkey) -> Result<()> {
         instructions::initialize(ctx, protocol_wallet)
     }
 
     /// Set the canonical enclave public key (can only be called once)
-    pub fn set_enclave_pubkey(
-        ctx: Context<AdminOnly>,
-        enclave_pubkey: [u8; 32],
-    ) -> Result<()> {
+    pub fn set_enclave_pubkey(ctx: Context<AdminOnly>, enclave_pubkey: [u8; 32]) -> Result<()> {
         instructions::set_enclave_pubkey(ctx, enclave_pubkey)
     }
 
@@ -72,18 +66,12 @@ pub mod sui_sentinel {
     }
 
     /// Update the protocol wallet address
-    pub fn update_protocol_wallet(
-        ctx: Context<AdminOnly>,
-        new_wallet: Pubkey,
-    ) -> Result<()> {
+    pub fn update_protocol_wallet(ctx: Context<AdminOnly>, new_wallet: Pubkey) -> Result<()> {
         instructions::update_protocol_wallet(ctx, new_wallet)
     }
 
     /// Transfer admin role to a new address
-    pub fn transfer_admin(
-        ctx: Context<AdminOnly>,
-        new_admin: Pubkey,
-    ) -> Result<()> {
+    pub fn transfer_admin(ctx: Context<AdminOnly>, new_admin: Pubkey) -> Result<()> {
         instructions::transfer_admin(ctx, new_admin)
     }
 
@@ -115,30 +103,28 @@ pub mod sui_sentinel {
         timestamp: i64,
         signature: [u8; 64],
     ) -> Result<()> {
-        instructions::register_agent(ctx, agent_id, cost_per_message, system_prompt, timestamp, signature)
+        instructions::register_agent(
+            ctx,
+            agent_id,
+            cost_per_message,
+            system_prompt,
+            timestamp,
+            signature,
+        )
     }
 
     /// Fund an agent's reward pool
-    pub fn fund_agent(
-        ctx: Context<FundAgent>,
-        amount: u64,
-    ) -> Result<()> {
+    pub fn fund_agent(ctx: Context<FundAgent>, amount: u64) -> Result<()> {
         instructions::fund_agent(ctx, amount)
     }
 
     /// Update agent cost (within 3 hour window)
-    pub fn update_agent_cost(
-        ctx: Context<UpdateAgent>,
-        new_cost: u64,
-    ) -> Result<()> {
+    pub fn update_agent_cost(ctx: Context<UpdateAgent>, new_cost: u64) -> Result<()> {
         instructions::update_agent_cost(ctx, new_cost)
     }
 
     /// Update agent system prompt (within 3 hour window)
-    pub fn update_agent_prompt(
-        ctx: Context<UpdateAgent>,
-        new_prompt: String,
-    ) -> Result<()> {
+    pub fn update_agent_prompt(ctx: Context<UpdateAgent>, new_prompt: String) -> Result<()> {
         instructions::update_agent_prompt(ctx, new_prompt)
     }
 
@@ -148,18 +134,12 @@ pub mod sui_sentinel {
     }
 
     /// Withdraw from agent balance (after lock period)
-    pub fn withdraw_from_agent(
-        ctx: Context<WithdrawFromAgent>,
-        amount: u64,
-    ) -> Result<()> {
+    pub fn withdraw_from_agent(ctx: Context<WithdrawFromAgent>, amount: u64) -> Result<()> {
         instructions::withdraw_from_agent(ctx, amount)
     }
 
     /// Request an attack on an agent
-    pub fn request_attack(
-        ctx: Context<RequestAttack>,
-        nonce: u64,
-    ) -> Result<()> {
+    pub fn request_attack(ctx: Context<RequestAttack>, nonce: u64) -> Result<()> {
         instructions::request_attack(ctx, nonce)
     }
 

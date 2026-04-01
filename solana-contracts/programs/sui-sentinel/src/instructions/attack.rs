@@ -1,18 +1,13 @@
+use super::signature::verify_ed25519_signature;
+use crate::{
+    errors::SentinelError, events::*, ConsumePrompt, RequestAttack, BASIS_POINTS,
+    CONSUME_PROMPT_INTENT, WITHDRAWAL_LOCK_PERIOD,
+};
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Transfer};
-use crate::{
-    errors::SentinelError,
-    events::*,
-    RequestAttack, ConsumePrompt,
-    CONSUME_PROMPT_INTENT, WITHDRAWAL_LOCK_PERIOD, BASIS_POINTS,
-};
-use super::signature::verify_ed25519_signature;
 
 /// Request an attack on an agent
-pub fn request_attack(
-    ctx: Context<RequestAttack>,
-    nonce: u64,
-) -> Result<()> {
+pub fn request_attack(ctx: Context<RequestAttack>, nonce: u64) -> Result<()> {
     let clock = Clock::get()?;
     let config = &ctx.accounts.protocol_config;
 
@@ -30,12 +25,13 @@ pub fn request_attack(
     require!(!is_defeated, SentinelError::AgentAlreadyDefeated);
 
     // Ensure withdrawal is locked (prevents owner from draining during attack)
-    let is_locked = clock.unix_timestamp < last_funded_timestamp.saturating_add(WITHDRAWAL_LOCK_PERIOD);
+    let is_locked =
+        clock.unix_timestamp < last_funded_timestamp.saturating_add(WITHDRAWAL_LOCK_PERIOD);
     require!(is_locked, SentinelError::WithdrawalLocked);
 
     // Calculate effective cost with dynamic fee
-    let raw_multiplier = 10000u64
-        .saturating_add(attack_count.saturating_mul(config.fee_increase_bps));
+    let raw_multiplier =
+        10000u64.saturating_add(attack_count.saturating_mul(config.fee_increase_bps));
     let multiplier = raw_multiplier.min(config.max_fee_multiplier_bps);
     let effective_cost = cost_per_message
         .saturating_mul(multiplier)
@@ -152,8 +148,7 @@ pub fn consume_prompt(
     let agent_bump = ctx.accounts.agent.bump;
 
     // Get enclave public key
-    let enclave_pubkey = config.enclave_pubkey
-        .ok_or(SentinelError::EnclaveNotSet)?;
+    let enclave_pubkey = config.enclave_pubkey.ok_or(SentinelError::EnclaveNotSet)?;
 
     // Build the message to verify
     // Message format: intent || timestamp || agent_id || success || score || attacker || nonce || message_hash
@@ -193,11 +188,7 @@ pub fn consume_prompt(
         if reward_amount > 0 {
             // Create signer seeds for the agent PDA
             let agent_id_bytes = agent_id.as_bytes();
-            let seeds = &[
-                b"agent".as_ref(),
-                agent_id_bytes,
-                &[agent_bump],
-            ];
+            let seeds = &[b"agent".as_ref(), agent_id_bytes, &[agent_bump]];
             let signer_seeds = &[&seeds[..]];
 
             // Transfer entire vault balance to attacker
