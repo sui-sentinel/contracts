@@ -5,12 +5,17 @@
   "scripts": {
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
     "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check",
-    "test": "anchor test"
+    "test": "anchor test",
+    "cli": "bun run scripts/cli.ts",
+    "deploy:testnet": "bun run scripts/cli.ts --network testnet --build --deploy",
+    "deploy:devnet": "bun run scripts/cli.ts --network devnet --build --deploy",
+    "deploy:mainnet": "bun run scripts/cli.ts --network mainnet --build --deploy"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.30.1",
     "@solana/spl-token": "^0.4.8",
     "@solana/web3.js": "^1.95.3",
+    "bs58": "^6.0.0",
     "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
