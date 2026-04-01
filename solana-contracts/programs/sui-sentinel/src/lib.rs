@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
+use anchor_spl::token::{Mint, Token, TokenAccount};
 
-declare_id!("B7jZYvzq9jdWw3ReWLs4d5SSoqYZ5yKnjAkzSpStAmZe");
+declare_id!("2pdFb495RGrbwiRJdin7aRmfsX4puTnoQGb7Rdd7sGDS");
 
 pub mod state;
 pub mod errors;
@@ -219,7 +219,7 @@ pub struct RegisterAgent<'info> {
         constraint = !protocol_config.is_paused @ SentinelError::ProtocolPaused,
         constraint = protocol_config.enclave_pubkey.is_some() @ SentinelError::EnclaveNotSet
     )]
-    pub protocol_config: Account<'info, ProtocolConfig>,
+    pub protocol_config: Box<Account<'info, ProtocolConfig>>,
 
     #[account(
         init,
@@ -228,10 +228,10 @@ pub struct RegisterAgent<'info> {
         seeds = [b"agent", agent_id.as_bytes()],
         bump
     )]
-    pub agent: Account<'info, Agent>,
+    pub agent: Box<Account<'info, Agent>>,
 
     /// The token mint for this agent
-    pub token_mint: Account<'info, Mint>,
+    pub token_mint: Box<Account<'info, Mint>>,
 
     /// Agent's token account for holding rewards
     #[account(
@@ -242,7 +242,7 @@ pub struct RegisterAgent<'info> {
         seeds = [b"agent_vault", agent.key().as_ref()],
         bump
     )]
-    pub agent_vault: Account<'info, TokenAccount>,
+    pub agent_vault: Box<Account<'info, TokenAccount>>,
 
     /// Agent's token account for accumulated fees
     #[account(
@@ -253,7 +253,7 @@ pub struct RegisterAgent<'info> {
         seeds = [b"agent_fees", agent.key().as_ref()],
         bump
     )]
-    pub agent_fees_vault: Account<'info, TokenAccount>,
+    pub agent_fees_vault: Box<Account<'info, TokenAccount>>,
 
     #[account(mut)]
     pub creator: Signer<'info>,
@@ -374,28 +374,28 @@ pub struct RequestAttack<'info> {
         bump = protocol_config.bump,
         constraint = !protocol_config.is_paused @ SentinelError::ProtocolPaused
     )]
-    pub protocol_config: Account<'info, ProtocolConfig>,
+    pub protocol_config: Box<Account<'info, ProtocolConfig>>,
 
     #[account(
         mut,
         seeds = [b"agent", agent.agent_id.as_bytes()],
         bump = agent.bump
     )]
-    pub agent: Account<'info, Agent>,
+    pub agent: Box<Account<'info, Agent>>,
 
     #[account(
         mut,
         seeds = [b"agent_vault", agent.key().as_ref()],
         bump = agent.vault_bump
     )]
-    pub agent_vault: Account<'info, TokenAccount>,
+    pub agent_vault: Box<Account<'info, TokenAccount>>,
 
     #[account(
         mut,
         seeds = [b"agent_fees", agent.key().as_ref()],
         bump = agent.fees_vault_bump
     )]
-    pub agent_fees_vault: Account<'info, TokenAccount>,
+    pub agent_fees_vault: Box<Account<'info, TokenAccount>>,
 
     #[account(
         init,
@@ -404,14 +404,14 @@ pub struct RequestAttack<'info> {
         seeds = [b"attack", agent.key().as_ref(), attacker.key().as_ref(), &nonce.to_le_bytes()],
         bump
     )]
-    pub attack: Account<'info, Attack>,
+    pub attack: Box<Account<'info, Attack>>,
 
     #[account(
         mut,
         constraint = attacker_token_account.owner == attacker.key(),
         constraint = attacker_token_account.mint == agent.token_mint
     )]
-    pub attacker_token_account: Account<'info, TokenAccount>,
+    pub attacker_token_account: Box<Account<'info, TokenAccount>>,
 
     /// CHECK: Protocol wallet receives protocol fees
     #[account(
@@ -426,7 +426,7 @@ pub struct RequestAttack<'info> {
         constraint = protocol_wallet_token_account.owner == protocol_config.protocol_wallet,
         constraint = protocol_wallet_token_account.mint == agent.token_mint
     )]
-    pub protocol_wallet_token_account: Account<'info, TokenAccount>,
+    pub protocol_wallet_token_account: Box<Account<'info, TokenAccount>>,
 
     #[account(mut)]
     pub attacker: Signer<'info>,
@@ -443,21 +443,21 @@ pub struct ConsumePrompt<'info> {
         constraint = !protocol_config.is_paused @ SentinelError::ProtocolPaused,
         constraint = protocol_config.enclave_pubkey.is_some() @ SentinelError::EnclaveNotSet
     )]
-    pub protocol_config: Account<'info, ProtocolConfig>,
+    pub protocol_config: Box<Account<'info, ProtocolConfig>>,
 
     #[account(
         mut,
         seeds = [b"agent", agent.agent_id.as_bytes()],
         bump = agent.bump
     )]
-    pub agent: Account<'info, Agent>,
+    pub agent: Box<Account<'info, Agent>>,
 
     #[account(
         mut,
         seeds = [b"agent_vault", agent.key().as_ref()],
         bump = agent.vault_bump
     )]
-    pub agent_vault: Account<'info, TokenAccount>,
+    pub agent_vault: Box<Account<'info, TokenAccount>>,
 
     #[account(
         mut,
@@ -467,14 +467,14 @@ pub struct ConsumePrompt<'info> {
         constraint = attack.agent == agent.key() @ SentinelError::InvalidAttack,
         constraint = attack.attacker == attacker.key() @ SentinelError::InvalidAttack
     )]
-    pub attack: Account<'info, Attack>,
+    pub attack: Box<Account<'info, Attack>>,
 
     #[account(
         mut,
         constraint = attacker_token_account.owner == attacker.key(),
         constraint = attacker_token_account.mint == agent.token_mint
     )]
-    pub attacker_token_account: Account<'info, TokenAccount>,
+    pub attacker_token_account: Box<Account<'info, TokenAccount>>,
 
     #[account(mut)]
     pub attacker: Signer<'info>,

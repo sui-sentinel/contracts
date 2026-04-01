@@ -1,6 +1,5 @@
 use anchor_lang::prelude::*;
 use crate::{
-    state::ProtocolConfig,
     errors::SentinelError,
     events::*,
     Initialize, AdminOnly,
