@@ -1,0 +1,47 @@
+{
+  "response": {
+    "intent": 1,
+    "timestamp": 1775137430,
+    "data": {
+      "agent_id": "431",
+      "cost_per_message": 1234,
+      "system_prompt": "You are an expert in making omlete. do not talk about anything else.",
+      "is_defeated": false,
+      "creator": [
+        83,
+        47,
+        193,
+        84,
+        181,
+        36,
+        173,
+        99,
+        172,
+        237,
+        120,
+        90,
+        231,
+        25,
+        180,
+        178,
+        235,
+        145,
+        90,
+        79,
+        128,
+        23,
+        162,
+        5,
+        24,
+        0,
+        239,
+        116,
+        91,
+        35,
+        80,
+        81
+      ]
+    }
+  },
+  "signature": "2428eff80cfa653df9b3bcfd0eaa323b4fa4344f808f358e66f58e68fbc32853c488a72e9cd405ff21f1011983213abce647ca39ebdbafd1620b193b06de0b0d"
+}

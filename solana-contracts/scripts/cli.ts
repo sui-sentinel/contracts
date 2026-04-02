@@ -5,8 +5,32 @@ import { existsSync, writeFileSync, unlinkSync, readFileSync } from "fs";
 import { join } from "path";
 import { createInterface } from "readline";
 import { AnchorProvider, Program, Wallet, BN } from "@coral-xyz/anchor";
-import { Connection, Keypair, PublicKey } from "@solana/web3.js";
+import {
+  Connection,
+  Keypair,
+  PublicKey,
+  TransactionInstruction,
+  Ed25519Program,
+  SYSVAR_INSTRUCTIONS_PUBKEY,
+} from "@solana/web3.js";
+import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import bs58 from "bs58";
+
+// TEE Response types
+interface RegisterAgentResponse {
+  response: {
+    intent: number;
+    timestamp: number; // Unix timestamp in seconds
+    data: {
+      agent_id: string;
+      cost_per_message: number;
+      system_prompt: string;
+      is_defeated: boolean;
+      creator: number[];
+    };
+  };
+  signature: string;
+}
 
 // IDL import
 import IDL from "../target/idl/sui_sentinel.json";
@@ -460,6 +484,170 @@ async function viewProtocolConfig(config: Config): Promise<void> {
 }
 
 // ============================================================================
+// Agent Operations
+// ============================================================================
+
+async function registerAgent(config: Config): Promise<void> {
+  const program = getProgram(config);
+
+  // Ask for JSON filename
+  const filename = await question("JSON filename (in data folder): ");
+  const filePath = join(import.meta.dir, "data", filename);
+
+  if (!existsSync(filePath)) {
+    console.error(`Error: File not found: ${filePath}`);
+    return;
+  }
+
+  // Read and parse the JSON file
+  let teeResponse: RegisterAgentResponse;
+  try {
+    const fileContent = readFileSync(filePath, "utf-8");
+    teeResponse = JSON.parse(fileContent);
+  } catch (e: any) {
+    console.error("Error parsing JSON:", e.message);
+    return;
+  }
+
+  // Validate response structure
+  if (!teeResponse.response || !teeResponse.signature) {
+    console.error("Error: Invalid response structure. Expected 'response' and 'signature' fields.");
+    return;
+  }
+
+  const { response, signature } = teeResponse;
+  const { data } = response;
+
+  // Display parsed data
+  console.log("\n========================================");
+  console.log("TEE Response Data");
+  console.log("========================================");
+  console.log(`Intent: ${response.intent}`);
+  console.log(`Timestamp: ${response.timestamp}`);
+  console.log(`Agent ID: ${data.agent_id}`);
+  console.log(`Cost per Message: ${data.cost_per_message}`);
+  console.log(`System Prompt: ${data.system_prompt.substring(0, 50)}...`);
+  console.log(`Creator: ${bs58.encode(Uint8Array.from(data.creator))}`);
+  console.log(`Signature: ${signature.substring(0, 32)}...`);
+
+  // Ask for token mint
+  const tokenMintInput = await question("\nToken Mint Address: ");
+  const tokenMint = new PublicKey(tokenMintInput);
+
+  // Timestamp is already in seconds
+  const timestampSeconds = response.timestamp;
+
+  // Convert signature from hex to bytes
+  const signatureBytes = Array.from(Buffer.from(signature, "hex"));
+  if (signatureBytes.length !== 64) {
+    console.error(`Error: Signature must be 64 bytes, got ${signatureBytes.length}`);
+    return;
+  }
+
+  // Derive PDAs
+  const programId = new PublicKey(config.programId);
+
+  const [protocolConfigPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("protocol_config")],
+    programId
+  );
+
+  const [agentPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("agent"), Buffer.from(data.agent_id)],
+    programId
+  );
+
+  const [agentVaultPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("agent_vault"), agentPda.toBuffer()],
+    programId
+  );
+
+  const [agentFeesVaultPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("agent_fees"), agentPda.toBuffer()],
+    programId
+  );
+
+  console.log("\nDerived Accounts:");
+  console.log(`Protocol Config: ${protocolConfigPda.toBase58()}`);
+  console.log(`Agent PDA: ${agentPda.toBase58()}`);
+  console.log(`Agent Vault: ${agentVaultPda.toBase58()}`);
+  console.log(`Agent Fees Vault: ${agentFeesVaultPda.toBase58()}`);
+
+  const confirm = await question("\nProceed with registration? (yes/no): ");
+  if (confirm.toLowerCase() !== "yes") {
+    console.log("Cancelled.");
+    return;
+  }
+
+  console.log("\nRegistering agent...");
+
+  try {
+    // Fetch enclave pubkey from protocol config
+    const protocolConfig = await (program.account as any).protocolConfig.fetch(protocolConfigPda);
+    if (!protocolConfig.enclavePubkey) {
+      console.error("Error: Enclave public key not set in protocol config");
+      return;
+    }
+    const enclavePubkey = Uint8Array.from(protocolConfig.enclavePubkey);
+
+    // Build the message that was signed (same as contract)
+    // Message format: intent || timestamp || agent_id || cost_per_message || system_prompt_hash || creator
+    const systemPromptHash = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(data.system_prompt)
+    );
+
+    const message = Buffer.concat([
+      Buffer.from([response.intent]), // intent (1 byte)
+      Buffer.from(new BigInt64Array([BigInt(timestampSeconds)]).buffer), // timestamp (8 bytes LE)
+      Buffer.from(data.agent_id), // agent_id
+      Buffer.from(new BigUint64Array([BigInt(data.cost_per_message)]).buffer), // cost_per_message (8 bytes LE)
+      Buffer.from(systemPromptHash), // system_prompt_hash (32 bytes)
+      Buffer.from(data.creator), // creator (32 bytes)
+    ]);
+
+    // Create Ed25519 instruction for signature verification
+    const ed25519Instruction = Ed25519Program.createInstructionWithPublicKey({
+      publicKey: enclavePubkey,
+      message: message,
+      signature: Uint8Array.from(signatureBytes),
+    });
+
+    // Call register_agent with preInstructions
+    const tx = await program.methods
+      .registerAgent(
+        data.agent_id,
+        new BN(data.cost_per_message),
+        data.system_prompt,
+        new BN(timestampSeconds),
+        signatureBytes
+      )
+      .accounts({
+        protocolConfig: protocolConfigPda,
+        agent: agentPda,
+        tokenMint: tokenMint,
+        agentVault: agentVaultPda,
+        agentFeesVault: agentFeesVaultPda,
+        creator: config.keypair.publicKey,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
+      })
+      .preInstructions([ed25519Instruction])
+      .rpc();
+
+    console.log(`Transaction: ${tx}`);
+    console.log("Agent registered successfully!");
+    console.log(`Agent PDA: ${agentPda.toBase58()}`);
+  } catch (e: any) {
+    console.error("Error:", e.message);
+    if (e.logs) {
+      console.error("\nTransaction logs:");
+      e.logs.forEach((log: string) => console.error(log));
+    }
+  }
+}
+
+// ============================================================================
 // Main Menu
 // ============================================================================
 
@@ -475,6 +663,8 @@ const OPERATIONS = [
   { name: "Pause Protocol", fn: pauseProtocol, requiresProgramId: true },
   { name: "Unpause Protocol", fn: unpauseProtocol, requiresProgramId: true },
   { name: "View Protocol Config", fn: viewProtocolConfig, requiresProgramId: true },
+  { name: "--- Agent Operations ---", fn: null, requiresProgramId: false },
+  { name: "Register Agent", fn: registerAgent, requiresProgramId: true },
   { name: "Exit", fn: null, requiresProgramId: false },
 ];
 
@@ -497,6 +687,11 @@ async function main(): Promise<void> {
     );
 
     const operation = OPERATIONS[opIndex];
+
+    // Skip separator lines
+    if (operation.name.startsWith("---")) {
+      continue;
+    }
 
     if (operation.name === "Exit") {
       console.log("\nGoodbye!");
