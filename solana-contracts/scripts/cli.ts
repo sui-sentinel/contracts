@@ -24,7 +24,7 @@ interface RegisterAgentResponse {
     data: {
       agent_id: string;
       cost_per_message: number;
-      system_prompt: string;
+      prompt_hash: number[]; // SHA-256 hash of the system prompt (32 bytes)
       is_defeated: boolean;
       creator: number[];
     };
@@ -518,6 +518,13 @@ async function registerAgent(config: Config): Promise<void> {
   const { response, signature } = teeResponse;
   const { data } = response;
 
+  // Use prompt_hash directly from the response
+  const promptHash = data.prompt_hash;
+  if (promptHash.length !== 32) {
+    console.error(`Error: prompt_hash must be 32 bytes, got ${promptHash.length}`);
+    return;
+  }
+
   // Display parsed data
   console.log("\n========================================");
   console.log("TEE Response Data");
@@ -526,7 +533,7 @@ async function registerAgent(config: Config): Promise<void> {
   console.log(`Timestamp: ${response.timestamp}`);
   console.log(`Agent ID: ${data.agent_id}`);
   console.log(`Cost per Message: ${data.cost_per_message}`);
-  console.log(`System Prompt: ${data.system_prompt.substring(0, 50)}...`);
+  console.log(`Prompt Hash: ${Buffer.from(promptHash).toString("hex")}`);
   console.log(`Creator: ${bs58.encode(Uint8Array.from(data.creator))}`);
   console.log(`Signature: ${signature.substring(0, 32)}...`);
 
@@ -591,18 +598,13 @@ async function registerAgent(config: Config): Promise<void> {
     const enclavePubkey = Uint8Array.from(protocolConfig.enclavePubkey);
 
     // Build the message that was signed (same as contract)
-    // Message format: intent || timestamp || agent_id || cost_per_message || system_prompt_hash || creator
-    const systemPromptHash = await crypto.subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(data.system_prompt)
-    );
-
+    // Message format: intent || timestamp || agent_id || cost_per_message || prompt_hash || creator
     const message = Buffer.concat([
       Buffer.from([response.intent]), // intent (1 byte)
       Buffer.from(new BigInt64Array([BigInt(timestampSeconds)]).buffer), // timestamp (8 bytes LE)
       Buffer.from(data.agent_id), // agent_id
       Buffer.from(new BigUint64Array([BigInt(data.cost_per_message)]).buffer), // cost_per_message (8 bytes LE)
-      Buffer.from(systemPromptHash), // system_prompt_hash (32 bytes)
+      Buffer.from(promptHash), // prompt_hash (32 bytes)
       Buffer.from(data.creator), // creator (32 bytes)
     ]);
 
@@ -618,7 +620,7 @@ async function registerAgent(config: Config): Promise<void> {
       .registerAgent(
         data.agent_id,
         new BN(data.cost_per_message),
-        data.system_prompt,
+        promptHash,
         new BN(timestampSeconds),
         signatureBytes
       )

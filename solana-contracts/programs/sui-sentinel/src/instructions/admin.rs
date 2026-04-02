@@ -21,7 +21,6 @@ pub fn initialize(ctx: Context<Initialize>, protocol_wallet: Pubkey) -> Result<(
     config.is_paused = false;
     config.bump = ctx.bumps.protocol_config;
     config.total_agents = 0;
-    config._reserved = vec![];
 
     emit!(ProtocolInitialized {
         admin: config.admin,

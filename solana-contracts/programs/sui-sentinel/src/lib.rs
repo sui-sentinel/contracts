@@ -99,15 +99,15 @@ pub mod sui_sentinel {
         ctx: Context<RegisterAgent>,
         agent_id: String,
         cost_per_message: u64,
-        system_prompt: String,
+        prompt_hash: [u8; 32],
         timestamp: i64,
-        signature: [u8; 64],
+        signature: Vec<u8>,
     ) -> Result<()> {
         instructions::register_agent(
             ctx,
             agent_id,
             cost_per_message,
-            system_prompt,
+            prompt_hash,
             timestamp,
             signature,
         )
@@ -123,9 +123,9 @@ pub mod sui_sentinel {
         instructions::update_agent_cost(ctx, new_cost)
     }
 
-    /// Update agent system prompt (within 3 hour window)
-    pub fn update_agent_prompt(ctx: Context<UpdateAgent>, new_prompt: String) -> Result<()> {
-        instructions::update_agent_prompt(ctx, new_prompt)
+    /// Update agent prompt hash (within 3 hour window)
+    pub fn update_agent_prompt_hash(ctx: Context<UpdateAgent>, new_prompt_hash: [u8; 32]) -> Result<()> {
+        instructions::update_agent_prompt_hash(ctx, new_prompt_hash)
     }
 
     /// Claim accumulated creator fees

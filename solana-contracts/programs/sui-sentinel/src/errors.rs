@@ -23,11 +23,8 @@ pub enum SentinelError {
     #[msg("Max fee multiplier must be at least 10000 (1x)")]
     InvalidMaxFeeMultiplier,
 
-    #[msg("Agent ID is too long (max 64 characters)")]
+    #[msg("Agent ID is too long (max 32 characters)")]
     AgentIdTooLong,
-
-    #[msg("System prompt is too long (max 2048 characters)")]
-    SystemPromptTooLong,
 
     #[msg("Agent has already been defeated")]
     AgentAlreadyDefeated,

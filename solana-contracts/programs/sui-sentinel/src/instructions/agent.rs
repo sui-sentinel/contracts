@@ -1,4 +1,4 @@
-use super::signature::verify_ed25519_signature;
+use super::signature::{build_register_agent_message, verify_ed25519_signature};
 use crate::{
     errors::SentinelError, events::*, ClaimFees, FundAgent, RegisterAgent, UpdateAgent,
     WithdrawFromAgent, SENTINEL_INTENT, UPDATE_WINDOW, WITHDRAWAL_LOCK_PERIOD,
@@ -7,20 +7,19 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Transfer};
 
 /// Register a new agent with enclave signature verification
+/// Note: signature is Vec<u8> instead of [u8; 64] to reduce stack usage
+#[inline(never)]
 pub fn register_agent(
     ctx: Context<RegisterAgent>,
     agent_id: String,
     cost_per_message: u64,
-    system_prompt: String,
+    prompt_hash: [u8; 32],
     timestamp: i64,
-    signature: [u8; 64],
+    signature: Vec<u8>,
 ) -> Result<()> {
     // Validate input lengths
-    require!(agent_id.len() <= 64, SentinelError::AgentIdTooLong);
-    require!(
-        system_prompt.len() <= 2048,
-        SentinelError::SystemPromptTooLong
-    );
+    require!(agent_id.len() <= 32, SentinelError::AgentIdTooLong);
+    require!(signature.len() == 64, SentinelError::InvalidSignature);
 
     let clock = Clock::get()?;
     let config = &ctx.accounts.protocol_config;
@@ -28,23 +27,28 @@ pub fn register_agent(
     // Get the enclave public key
     let enclave_pubkey = config.enclave_pubkey.ok_or(SentinelError::EnclaveNotSet)?;
 
-    // Build the message to verify
-    // Message format: intent || timestamp || agent_id || cost_per_message || system_prompt_hash || creator
-    let system_prompt_hash = anchor_lang::solana_program::hash::hash(system_prompt.as_bytes());
-    let mut message = Vec::new();
-    message.push(SENTINEL_INTENT);
-    message.extend_from_slice(&timestamp.to_le_bytes());
-    message.extend_from_slice(agent_id.as_bytes());
-    message.extend_from_slice(&cost_per_message.to_le_bytes());
-    message.extend_from_slice(system_prompt_hash.as_ref());
-    message.extend_from_slice(ctx.accounts.creator.key().as_ref());
+    // Build the message using helper function (prompt_hash is already computed off-chain)
+    let message = build_register_agent_message(
+        SENTINEL_INTENT,
+        timestamp,
+        &agent_id,
+        cost_per_message,
+        &prompt_hash,
+        &ctx.accounts.creator.key(),
+    );
+
+    // Convert signature slice to array reference for verification
+    let sig_array: &[u8; 64] = signature
+        .as_slice()
+        .try_into()
+        .map_err(|_| SentinelError::InvalidSignature)?;
 
     // Verify the signature
     verify_ed25519_signature(
         &ctx.accounts.instructions_sysvar,
         &enclave_pubkey,
         &message,
-        &signature,
+        sig_array,
         timestamp,
         clock.unix_timestamp,
     )?;
@@ -60,7 +64,7 @@ pub fn register_agent(
     agent.owner = creator_key;
     agent.token_mint = token_mint_key;
     agent.cost_per_message = cost_per_message;
-    agent.system_prompt = system_prompt;
+    agent.prompt_hash = prompt_hash;
     agent.created_at = clock.unix_timestamp;
     agent.last_funded_timestamp = clock.unix_timestamp; // Set to current time to start lock
     agent.attack_count = 0;
@@ -68,7 +72,6 @@ pub fn register_agent(
     agent.bump = ctx.bumps.agent;
     agent.vault_bump = ctx.bumps.agent_vault;
     agent.fees_vault_bump = ctx.bumps.agent_fees_vault;
-    agent._reserved = vec![];
 
     emit!(AgentRegistered {
         agent: agent_key,
@@ -147,12 +150,9 @@ pub fn update_agent_cost(ctx: Context<UpdateAgent>, new_cost: u64) -> Result<()>
     Ok(())
 }
 
-/// Update agent system prompt (within 3 hour window)
-pub fn update_agent_prompt(ctx: Context<UpdateAgent>, new_prompt: String) -> Result<()> {
+/// Update agent prompt hash (within 3 hour window)
+pub fn update_agent_prompt_hash(ctx: Context<UpdateAgent>, new_prompt_hash: [u8; 32]) -> Result<()> {
     let clock = Clock::get()?;
-
-    // Validate prompt length
-    require!(new_prompt.len() <= 2048, SentinelError::SystemPromptTooLong);
 
     // Capture keys before mutable borrow
     let agent_key = ctx.accounts.agent.key();
@@ -166,7 +166,7 @@ pub fn update_agent_prompt(ctx: Context<UpdateAgent>, new_prompt: String) -> Res
     );
 
     let agent = &mut ctx.accounts.agent;
-    agent.system_prompt = new_prompt;
+    agent.prompt_hash = new_prompt_hash;
 
     emit!(AgentPromptUpdated {
         agent: agent_key,

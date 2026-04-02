@@ -39,10 +39,6 @@ pub struct ProtocolConfig {
 
     /// Total agents registered
     pub total_agents: u64,
-
-    /// Reserved space for future upgrades
-    #[max_len(64)]
-    pub _reserved: Vec<u8>,
 }
 
 /// Agent account - represents an AI agent that can be attacked
@@ -50,7 +46,7 @@ pub struct ProtocolConfig {
 #[derive(InitSpace)]
 pub struct Agent {
     /// Unique identifier for the agent
-    #[max_len(64)]
+    #[max_len(32)]
     pub agent_id: String,
 
     /// Owner/creator of the agent
@@ -62,9 +58,8 @@ pub struct Agent {
     /// Cost per message in token base units
     pub cost_per_message: u64,
 
-    /// The AI system prompt
-    #[max_len(2048)]
-    pub system_prompt: String,
+    /// Hash of the AI system prompt (full prompt stored off-chain)
+    pub prompt_hash: [u8; 32],
 
     /// Timestamp when agent was created
     pub created_at: i64,
@@ -88,10 +83,6 @@ pub struct Agent {
 
     /// Bump seed for agent fees vault PDA
     pub fees_vault_bump: u8,
-
-    /// Reserved space for future upgrades
-    #[max_len(32)]
-    pub _reserved: Vec<u8>,
 }
 
 /// Attack account - represents an ongoing attack
