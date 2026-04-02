@@ -5,7 +5,7 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-sui_sentinel = "B7jZYvzq9jdWw3ReWLs4d5SSoqYZ5yKnjAkzSpStAmZe"
+sui_sentinel = "DVuZVtU3JWdiPsTf3GRmHxxuZo7Wdrc64NRcPgqdK5eM"
 
 [programs.localnet]
 sui_sentinel = "2pdFb495RGrbwiRJdin7aRmfsX4puTnoQGb7Rdd7sGDS"

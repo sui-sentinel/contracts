@@ -112,7 +112,13 @@ function getProgram(config: Config): Program {
     commitment: "confirmed",
   });
 
-  return new Program(IDL as any, provider);
+  // Create a copy of the IDL with the correct program address from config
+  const idlWithAddress = {
+    ...IDL,
+    address: config.programId,
+  };
+
+  return new Program(idlWithAddress as any, provider);
 }
 
 async function runCommand(
@@ -139,8 +145,112 @@ async function runCommand(
 }
 
 // ============================================================================
-// Deploy Operation
+// Deploy Operations
 // ============================================================================
+
+const LIB_RS_PATH = join(import.meta.dir, "..", "programs", "sui-sentinel", "src", "lib.rs");
+const PROGRAM_KEYPAIR_PATH = join(import.meta.dir, "..", "target", "deploy", "sui_sentinel-keypair.json");
+const PROGRAM_SO_PATH = join(import.meta.dir, "..", "target", "deploy", "sui_sentinel.so");
+
+function getProgramIdFromKeypair(): string | null {
+  if (!existsSync(PROGRAM_KEYPAIR_PATH)) {
+    return null;
+  }
+  const keypairData = JSON.parse(readFileSync(PROGRAM_KEYPAIR_PATH, "utf-8"));
+  const keypair = Keypair.fromSecretKey(Uint8Array.from(keypairData));
+  return keypair.publicKey.toBase58();
+}
+
+function getDeclaredProgramId(): string | null {
+  if (!existsSync(LIB_RS_PATH)) {
+    return null;
+  }
+  const content = readFileSync(LIB_RS_PATH, "utf-8");
+  const match = content.match(/declare_id!\("([^"]+)"\)/);
+  return match ? match[1] : null;
+}
+
+function updateDeclaredProgramId(newProgramId: string): boolean {
+  if (!existsSync(LIB_RS_PATH)) {
+    return false;
+  }
+  const content = readFileSync(LIB_RS_PATH, "utf-8");
+  const updated = content.replace(
+    /declare_id!\("[^"]+"\)/,
+    `declare_id!("${newProgramId}")`
+  );
+  writeFileSync(LIB_RS_PATH, updated);
+  return true;
+}
+
+async function syncProgramIds(): Promise<{ programId: string; synced: boolean } | null> {
+  console.log("\n========================================");
+  console.log("Syncing Program IDs");
+  console.log("========================================");
+
+  const keypairProgramId = getProgramIdFromKeypair();
+  const declaredProgramId = getDeclaredProgramId();
+
+  console.log(`Program Keypair ID: ${keypairProgramId || "Not found"}`);
+  console.log(`Declared ID (lib.rs): ${declaredProgramId || "Not found"}`);
+
+  if (!keypairProgramId) {
+    console.log("\nNo program keypair found. Generating new one...");
+    const result = await runCommand("anchor", ["keys", "list"]);
+    if (!result.success) {
+      console.error("Failed to generate program keypair");
+      return null;
+    }
+    const newKeypairId = getProgramIdFromKeypair();
+    if (!newKeypairId) {
+      console.error("Failed to read generated keypair");
+      return null;
+    }
+    console.log(`Generated new Program ID: ${newKeypairId}`);
+
+    if (declaredProgramId !== newKeypairId) {
+      console.log(`Updating declare_id! to: ${newKeypairId}`);
+      updateDeclaredProgramId(newKeypairId);
+      return { programId: newKeypairId, synced: true };
+    }
+    return { programId: newKeypairId, synced: false };
+  }
+
+  if (declaredProgramId !== keypairProgramId) {
+    console.log(`\nMismatch detected! Updating declare_id! to match keypair...`);
+    updateDeclaredProgramId(keypairProgramId);
+    console.log(`Updated declare_id! to: ${keypairProgramId}`);
+    return { programId: keypairProgramId, synced: true };
+  }
+
+  console.log("\nProgram IDs are in sync!");
+  return { programId: keypairProgramId, synced: false };
+}
+
+async function buildProgram(forceRebuild: boolean = false): Promise<boolean> {
+  console.log("\n========================================");
+  console.log("Building Program");
+  console.log("========================================");
+
+  if (!forceRebuild && existsSync(PROGRAM_SO_PATH)) {
+    const rebuild = await question("Program already built. Rebuild? (yes/no): ");
+    if (rebuild.toLowerCase() !== "yes") {
+      console.log("Skipping build.");
+      return true;
+    }
+  }
+
+  console.log("\nRunning anchor build...");
+  const result = await runCommand("anchor", ["build"]);
+
+  if (result.success) {
+    console.log("Build successful!");
+    return true;
+  } else {
+    console.error("Build failed!");
+    return false;
+  }
+}
 
 async function deployProgram(network: NetworkType): Promise<void> {
   const privateKey = process.env.ADMIN_PRIVATE_KEY;
@@ -150,52 +260,131 @@ async function deployProgram(network: NetworkType): Promise<void> {
   }
 
   const keypairPath = join(import.meta.dir, "..", ".keypair.json");
-  const programPath = join(import.meta.dir, "..", "target", "deploy", "sui_sentinel.so");
-  const programKeypairPath = join(import.meta.dir, "..", "target", "deploy", "sui_sentinel-keypair.json");
 
   try {
-    // Create temp keypair file
+    // Create temp keypair file for payer
     const keypairBytes = bs58.decode(privateKey);
     writeFileSync(keypairPath, JSON.stringify(Array.from(keypairBytes)));
 
-    // Check if program is built
-    if (!existsSync(programPath)) {
-      console.log("\nProgram not built. Building now...");
-      const buildResult = await runCommand("anchor", ["build"]);
-      if (!buildResult.success) {
-        console.error("Build failed!");
+    // Step 1: Sync program IDs
+    const syncResult = await syncProgramIds();
+    if (!syncResult) {
+      console.error("Failed to sync program IDs");
+      return;
+    }
+
+    // Step 2: Build (force rebuild if IDs were synced)
+    const buildSuccess = await buildProgram(syncResult.synced);
+    if (!buildSuccess) {
+      return;
+    }
+
+    // Step 3: Check balance
+    const rpcUrl = NETWORK_URLS[network];
+    console.log("\n========================================");
+    console.log(`Deploying to ${network}`);
+    console.log("========================================");
+    console.log(`RPC URL: ${rpcUrl}`);
+    console.log(`Program ID: ${syncResult.programId}`);
+
+    console.log("\nChecking wallet balance...");
+    await runCommand("solana", ["balance", "--url", rpcUrl, "--keypair", keypairPath]);
+
+    // Step 4: Check if program already exists (for upgrade)
+    console.log("\nChecking if program exists on-chain...");
+    const showResult = await runCommand("solana", [
+      "program", "show", syncResult.programId, "--url", rpcUrl
+    ]);
+
+    const isUpgrade = showResult.success && showResult.output.includes("Program Id:");
+
+    if (isUpgrade) {
+      console.log("\nProgram exists. This will be an UPGRADE.");
+      const confirm = await question("Proceed with upgrade? (yes/no): ");
+      if (confirm.toLowerCase() !== "yes") {
+        console.log("Cancelled.");
+        return;
+      }
+    } else {
+      console.log("\nProgram does not exist. This will be an initial DEPLOY.");
+      const confirm = await question("Proceed with deployment? (yes/no): ");
+      if (confirm.toLowerCase() !== "yes") {
+        console.log("Cancelled.");
         return;
       }
     }
 
-    // Check balance
-    const rpcUrl = NETWORK_URLS[network];
-    console.log(`\nDeploying to ${network}...`);
-    console.log(`RPC URL: ${rpcUrl}`);
-
-    await runCommand("solana", ["balance", "--url", rpcUrl, "--keypair", keypairPath]);
-
-    // Deploy
+    // Step 5: Deploy/Upgrade
+    console.log(`\n${isUpgrade ? "Upgrading" : "Deploying"} program...`);
     const deployResult = await runCommand("solana", [
-      "program", "deploy", programPath,
+      "program", "deploy", PROGRAM_SO_PATH,
       "--url", rpcUrl,
       "--keypair", keypairPath,
-      "--program-id", programKeypairPath,
+      "--program-id", PROGRAM_KEYPAIR_PATH,
     ]);
 
     if (deployResult.success) {
-      // Get program ID from keypair
-      const programKeypairData = JSON.parse(readFileSync(programKeypairPath, "utf-8"));
-      const programKeypair = Keypair.fromSecretKey(Uint8Array.from(programKeypairData));
-      console.log(`\nDeployment successful!`);
-      console.log(`Program ID: ${programKeypair.publicKey.toBase58()}`);
-      console.log(`\nAdd this to your .env.local:`);
-      console.log(`${getProgramIdEnvKey(network)}=${programKeypair.publicKey.toBase58()}`);
+      console.log("\n========================================");
+      console.log("Deployment Successful!");
+      console.log("========================================");
+      console.log(`Program ID: ${syncResult.programId}`);
+      console.log(`Network: ${network}`);
+
+      // Check if env var needs updating
+      const envKey = getProgramIdEnvKey(network);
+      const currentEnvId = process.env[envKey];
+      if (currentEnvId !== syncResult.programId) {
+        console.log(`\nUpdate your .env.local:`);
+        console.log(`${envKey}=${syncResult.programId}`);
+      } else {
+        console.log(`\n.env.local already has correct ${envKey}`);
+      }
+    } else {
+      console.error("\nDeployment failed!");
     }
   } finally {
     if (existsSync(keypairPath)) {
       unlinkSync(keypairPath);
     }
+  }
+}
+
+async function showProgramStatus(network: NetworkType): Promise<void> {
+  console.log("\n========================================");
+  console.log("Program Status");
+  console.log("========================================");
+
+  const keypairProgramId = getProgramIdFromKeypair();
+  const declaredProgramId = getDeclaredProgramId();
+  const envKey = getProgramIdEnvKey(network);
+  const envProgramId = process.env[envKey];
+
+  console.log(`\nProgram Keypair ID: ${keypairProgramId || "Not found"}`);
+  console.log(`Declared ID (lib.rs): ${declaredProgramId || "Not found"}`);
+  console.log(`Env ID (${envKey}): ${envProgramId || "Not set"}`);
+
+  // Check sync status
+  const allMatch = keypairProgramId &&
+                   keypairProgramId === declaredProgramId &&
+                   keypairProgramId === envProgramId;
+
+  if (allMatch) {
+    console.log("\nStatus: All program IDs are in sync!");
+  } else {
+    console.log("\nStatus: Program IDs are OUT OF SYNC!");
+    if (keypairProgramId !== declaredProgramId) {
+      console.log("  - Keypair and declare_id! mismatch");
+    }
+    if (keypairProgramId !== envProgramId) {
+      console.log("  - Keypair and .env.local mismatch");
+    }
+  }
+
+  // Check on-chain status
+  if (envProgramId) {
+    const rpcUrl = NETWORK_URLS[network];
+    console.log(`\nChecking on-chain status for ${network}...`);
+    await runCommand("solana", ["program", "show", envProgramId, "--url", rpcUrl]);
   }
 }
 
@@ -544,10 +733,10 @@ async function registerAgent(config: Config): Promise<void> {
   // Timestamp is already in seconds
   const timestampSeconds = response.timestamp;
 
-  // Convert signature from hex to bytes
-  const signatureBytes = Array.from(Buffer.from(signature, "hex"));
-  if (signatureBytes.length !== 64) {
-    console.error(`Error: Signature must be 64 bytes, got ${signatureBytes.length}`);
+  // Convert signature from hex to Buffer
+  const signatureBuffer = Buffer.from(signature, "hex");
+  if (signatureBuffer.length !== 64) {
+    console.error(`Error: Signature must be 64 bytes, got ${signatureBuffer.length}`);
     return;
   }
 
@@ -597,6 +786,9 @@ async function registerAgent(config: Config): Promise<void> {
     }
     const enclavePubkey = Uint8Array.from(protocolConfig.enclavePubkey);
 
+    // Convert promptHash to Buffer for Anchor
+    const promptHashBuffer = Buffer.from(promptHash);
+
     // Build the message that was signed (same as contract)
     // Message format: intent || timestamp || agent_id || cost_per_message || prompt_hash || creator
     const message = Buffer.concat([
@@ -604,7 +796,7 @@ async function registerAgent(config: Config): Promise<void> {
       Buffer.from(new BigInt64Array([BigInt(timestampSeconds)]).buffer), // timestamp (8 bytes LE)
       Buffer.from(data.agent_id), // agent_id
       Buffer.from(new BigUint64Array([BigInt(data.cost_per_message)]).buffer), // cost_per_message (8 bytes LE)
-      Buffer.from(promptHash), // prompt_hash (32 bytes)
+      promptHashBuffer, // prompt_hash (32 bytes)
       Buffer.from(data.creator), // creator (32 bytes)
     ]);
 
@@ -612,17 +804,19 @@ async function registerAgent(config: Config): Promise<void> {
     const ed25519Instruction = Ed25519Program.createInstructionWithPublicKey({
       publicKey: enclavePubkey,
       message: message,
-      signature: Uint8Array.from(signatureBytes),
+      signature: signatureBuffer,
     });
 
     // Call register_agent with preInstructions
+    // Note: prompt_hash is [u8; 32] (fixed array) -> pass as number[]
+    //       signature is Vec<u8> (bytes) -> pass as Buffer
     const tx = await program.methods
       .registerAgent(
         data.agent_id,
         new BN(data.cost_per_message),
-        promptHash,
+        Array.from(promptHashBuffer),
         new BN(timestampSeconds),
-        signatureBytes
+        signatureBuffer
       )
       .accounts({
         protocolConfig: protocolConfigPda,
@@ -654,7 +848,12 @@ async function registerAgent(config: Config): Promise<void> {
 // ============================================================================
 
 const OPERATIONS = [
-  { name: "Deploy Program", fn: null, requiresProgramId: false },
+  { name: "--- Deploy & Build ---", fn: null, requiresProgramId: false },
+  { name: "Deploy/Upgrade Program", fn: null, requiresProgramId: false, special: "deploy" },
+  { name: "Build Program", fn: null, requiresProgramId: false, special: "build" },
+  { name: "Sync Program IDs", fn: null, requiresProgramId: false, special: "sync" },
+  { name: "Show Program Status", fn: null, requiresProgramId: false, special: "status" },
+  { name: "--- Admin Operations ---", fn: null, requiresProgramId: false },
   { name: "Initialize Protocol", fn: initialize, requiresProgramId: true },
   { name: "Set Enclave Public Key", fn: setEnclavePubkey, requiresProgramId: true },
   { name: "Update Enclave Public Key", fn: updateEnclavePubkey, requiresProgramId: true },
@@ -688,7 +887,7 @@ async function main(): Promise<void> {
       OPERATIONS.map((op) => op.name)
     );
 
-    const operation = OPERATIONS[opIndex];
+    const operation = OPERATIONS[opIndex] as { name: string; fn: any; requiresProgramId: boolean; special?: string };
 
     // Skip separator lines
     if (operation.name.startsWith("---")) {
@@ -700,8 +899,26 @@ async function main(): Promise<void> {
       break;
     }
 
-    if (operation.name === "Deploy Program") {
-      await deployProgram(network);
+    // Handle special operations (deploy, build, sync, status)
+    if (operation.special) {
+      try {
+        switch (operation.special) {
+          case "deploy":
+            await deployProgram(network);
+            break;
+          case "build":
+            await buildProgram(false);
+            break;
+          case "sync":
+            await syncProgramIds();
+            break;
+          case "status":
+            await showProgramStatus(network);
+            break;
+        }
+      } catch (e: any) {
+        console.error("Error:", e.message);
+      }
       continue;
     }
 

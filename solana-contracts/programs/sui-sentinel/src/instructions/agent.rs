@@ -8,12 +8,13 @@ use anchor_spl::token::{self, Transfer};
 
 /// Register a new agent with enclave signature verification
 /// Note: signature is Vec<u8> instead of [u8; 64] to reduce stack usage
+/// Note: prompt_hash is passed by reference to reduce stack usage
 #[inline(never)]
 pub fn register_agent(
     ctx: Context<RegisterAgent>,
     agent_id: String,
     cost_per_message: u64,
-    prompt_hash: [u8; 32],
+    prompt_hash: &[u8; 32],
     timestamp: i64,
     signature: Vec<u8>,
 ) -> Result<()> {
@@ -64,7 +65,7 @@ pub fn register_agent(
     agent.owner = creator_key;
     agent.token_mint = token_mint_key;
     agent.cost_per_message = cost_per_message;
-    agent.prompt_hash = prompt_hash;
+    agent.prompt_hash = *prompt_hash;
     agent.created_at = clock.unix_timestamp;
     agent.last_funded_timestamp = clock.unix_timestamp; // Set to current time to start lock
     agent.attack_count = 0;

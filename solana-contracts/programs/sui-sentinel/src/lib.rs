@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
 
-declare_id!("2pdFb495RGrbwiRJdin7aRmfsX4puTnoQGb7Rdd7sGDS");
+declare_id!("EExSvcsjdAQm1zWJZtPhLkkbPTJBnCBv7J98saf54kaB");
 
 pub mod errors;
 pub mod events;
@@ -95,6 +95,7 @@ pub mod sui_sentinel {
     }
 
     /// Register a new agent with enclave signature verification
+    #[inline(never)]
     pub fn register_agent(
         ctx: Context<RegisterAgent>,
         agent_id: String,
@@ -107,7 +108,7 @@ pub mod sui_sentinel {
             ctx,
             agent_id,
             cost_per_message,
-            prompt_hash,
+            &prompt_hash,
             timestamp,
             signature,
         )
@@ -124,7 +125,10 @@ pub mod sui_sentinel {
     }
 
     /// Update agent prompt hash (within 3 hour window)
-    pub fn update_agent_prompt_hash(ctx: Context<UpdateAgent>, new_prompt_hash: [u8; 32]) -> Result<()> {
+    pub fn update_agent_prompt_hash(
+        ctx: Context<UpdateAgent>,
+        new_prompt_hash: [u8; 32],
+    ) -> Result<()> {
         instructions::update_agent_prompt_hash(ctx, new_prompt_hash)
     }
 
