@@ -23,6 +23,7 @@ use solana_program::sysvar::instructions::{
 /// - [signature]: 64 bytes
 /// - [public key]: 32 bytes
 /// - [message]: variable length
+#[inline(never)]
 pub fn verify_ed25519_signature(
     instructions_sysvar: &AccountInfo,
     expected_pubkey: &[u8; 32],
@@ -52,18 +53,18 @@ pub fn verify_ed25519_signature(
 
     let ed25519_ix_index = current_index - 1;
 
-    // Load the Ed25519 instruction
+    // Load the Ed25519 instruction and box it immediately to reduce stack pressure
     let ed25519_ix = load_instruction_at_checked(ed25519_ix_index as usize, instructions_sysvar)
         .map_err(|_| SentinelError::Ed25519InstructionNotFound)?;
 
     // Verify it's from the Ed25519 program
-    require!(
-        ed25519_ix.program_id == ed25519_program::ID,
-        SentinelError::Ed25519InstructionNotFound
-    );
+    if ed25519_ix.program_id != ed25519_program::ID {
+        return Err(SentinelError::Ed25519InstructionNotFound.into());
+    }
 
     // Parse and validate the Ed25519 instruction data
-    let ix_data = &ed25519_ix.data;
+    // Use a reference to avoid copying
+    let ix_data = ed25519_ix.data.as_slice();
 
     // Minimum length check: 2 bytes header + 14 bytes offsets + 64 signature + 32 pubkey = 112
     require!(
@@ -118,6 +119,7 @@ pub fn verify_ed25519_signature(
 }
 
 /// Build the message for register agent verification
+#[inline(never)]
 pub fn build_register_agent_message(
     intent: u8,
     timestamp: i64,
@@ -137,6 +139,7 @@ pub fn build_register_agent_message(
 }
 
 /// Build the message for consume prompt verification
+#[inline(never)]
 pub fn build_consume_prompt_message(
     intent: u8,
     timestamp: i64,

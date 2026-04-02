@@ -64,4 +64,10 @@ pub enum SentinelError {
 
     #[msg("Invalid instruction sysvar")]
     InvalidInstructionsSysvar,
+
+    #[msg("Agent vaults have already been initialized")]
+    VaultsAlreadyInitialized,
+
+    #[msg("Token mint does not match agent's token mint")]
+    InvalidTokenMint,
 }

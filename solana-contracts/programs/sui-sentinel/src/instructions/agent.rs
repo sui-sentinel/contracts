@@ -1,7 +1,7 @@
 use super::signature::{build_register_agent_message, verify_ed25519_signature};
 use crate::{
-    errors::SentinelError, events::*, ClaimFees, FundAgent, RegisterAgent, UpdateAgent,
-    WithdrawFromAgent, SENTINEL_INTENT, UPDATE_WINDOW, WITHDRAWAL_LOCK_PERIOD,
+    errors::SentinelError, events::*, ClaimFees, FundAgent, InitAgentVaults, RegisterAgent,
+    UpdateAgent, WithdrawFromAgent, SENTINEL_INTENT, UPDATE_WINDOW, WITHDRAWAL_LOCK_PERIOD,
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Transfer};
@@ -71,8 +71,9 @@ pub fn register_agent(
     agent.attack_count = 0;
     agent.is_defeated = false;
     agent.bump = ctx.bumps.agent;
-    agent.vault_bump = ctx.bumps.agent_vault;
-    agent.fees_vault_bump = ctx.bumps.agent_fees_vault;
+    // Vault bumps are set to 0 initially, will be set by init_agent_vaults
+    agent.vault_bump = 0;
+    agent.fees_vault_bump = 0;
 
     emit!(AgentRegistered {
         agent: agent_key,
@@ -82,6 +83,23 @@ pub fn register_agent(
         cost_per_message,
         timestamp: clock.unix_timestamp,
     });
+
+    Ok(())
+}
+
+/// Initialize agent vault accounts (must be called after register_agent)
+pub fn init_agent_vaults(ctx: Context<InitAgentVaults>) -> Result<()> {
+    // Validate token mint matches agent's token mint
+    require!(
+        ctx.accounts.token_mint.key() == ctx.accounts.agent.token_mint,
+        SentinelError::InvalidTokenMint
+    );
+
+    let agent = &mut ctx.accounts.agent;
+
+    // Store the vault bumps
+    agent.vault_bump = ctx.bumps.agent_vault;
+    agent.fees_vault_bump = ctx.bumps.agent_fees_vault;
 
     Ok(())
 }

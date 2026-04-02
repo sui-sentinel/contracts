@@ -775,7 +775,7 @@ async function registerAgent(config: Config): Promise<void> {
     return;
   }
 
-  console.log("\nRegistering agent...");
+  console.log("\nStep 1: Registering agent...");
 
   try {
     // Fetch enclave pubkey from protocol config
@@ -807,10 +807,10 @@ async function registerAgent(config: Config): Promise<void> {
       signature: signatureBuffer,
     });
 
-    // Call register_agent with preInstructions
+    // Step 1: Call register_agent (creates agent account only)
     // Note: prompt_hash is [u8; 32] (fixed array) -> pass as number[]
     //       signature is Vec<u8> (bytes) -> pass as Buffer
-    const tx = await program.methods
+    const tx1 = await program.methods
       .registerAgent(
         data.agent_id,
         new BN(data.cost_per_message),
@@ -822,18 +822,35 @@ async function registerAgent(config: Config): Promise<void> {
         protocolConfig: protocolConfigPda,
         agent: agentPda,
         tokenMint: tokenMint,
-        agentVault: agentVaultPda,
-        agentFeesVault: agentFeesVaultPda,
         creator: config.keypair.publicKey,
-        tokenProgram: TOKEN_PROGRAM_ID,
         instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
       })
       .preInstructions([ed25519Instruction])
       .rpc();
 
-    console.log(`Transaction: ${tx}`);
-    console.log("Agent registered successfully!");
+    console.log(`Transaction 1 (register_agent): ${tx1}`);
+    console.log("Agent account created successfully!");
+
+    // Step 2: Initialize vault accounts
+    console.log("\nStep 2: Initializing vault accounts...");
+
+    const tx2 = await program.methods
+      .initAgentVaults()
+      .accounts({
+        agent: agentPda,
+        tokenMint: tokenMint,
+        agentVault: agentVaultPda,
+        agentFeesVault: agentFeesVaultPda,
+        payer: config.keypair.publicKey,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .rpc();
+
+    console.log(`Transaction 2 (init_agent_vaults): ${tx2}`);
+    console.log("\nAgent registered successfully!");
     console.log(`Agent PDA: ${agentPda.toBase58()}`);
+    console.log(`Agent Vault: ${agentVaultPda.toBase58()}`);
+    console.log(`Agent Fees Vault: ${agentFeesVaultPda.toBase58()}`);
   } catch (e: any) {
     console.error("Error:", e.message);
     if (e.logs) {

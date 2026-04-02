@@ -95,6 +95,7 @@ pub mod sui_sentinel {
     }
 
     /// Register a new agent with enclave signature verification
+    /// Note: Call init_agent_vaults after this to create vault accounts
     #[inline(never)]
     pub fn register_agent(
         ctx: Context<RegisterAgent>,
@@ -112,6 +113,11 @@ pub mod sui_sentinel {
             timestamp,
             signature,
         )
+    }
+
+    /// Initialize agent vault accounts (must be called after register_agent)
+    pub fn init_agent_vaults(ctx: Context<InitAgentVaults>) -> Result<()> {
+        instructions::init_agent_vaults(ctx)
     }
 
     /// Fund an agent's reward pool
@@ -194,6 +200,8 @@ pub struct AdminOnly<'info> {
     pub admin: Signer<'info>,
 }
 
+/// Register agent - Step 1: Create agent account and verify signature
+/// Note: Vault accounts are created separately via InitAgentVaults
 #[derive(Accounts)]
 #[instruction(agent_id: String)]
 pub struct RegisterAgent<'info> {
@@ -215,12 +223,36 @@ pub struct RegisterAgent<'info> {
     pub agent: Box<Account<'info, Agent>>,
 
     /// The token mint for this agent
-    pub token_mint: Box<Account<'info, Mint>>,
+    pub token_mint: Account<'info, Mint>,
+
+    #[account(mut)]
+    pub creator: Signer<'info>,
+
+    pub system_program: Program<'info, System>,
+
+    /// CHECK: Instructions sysvar for Ed25519 signature verification
+    #[account(address = solana_program::sysvar::instructions::ID)]
+    pub instructions_sysvar: AccountInfo<'info>,
+}
+
+/// Register agent - Step 2: Initialize vault accounts
+#[derive(Accounts)]
+pub struct InitAgentVaults<'info> {
+    #[account(
+        mut,
+        seeds = [b"agent", agent.agent_id.as_bytes()],
+        bump = agent.bump,
+        constraint = agent.vault_bump == 0 @ SentinelError::VaultsAlreadyInitialized
+    )]
+    pub agent: Box<Account<'info, Agent>>,
+
+    /// CHECK: The token mint for this agent - validated in instruction
+    pub token_mint: UncheckedAccount<'info>,
 
     /// Agent's token account for holding rewards
     #[account(
         init,
-        payer = creator,
+        payer = payer,
         token::mint = token_mint,
         token::authority = agent,
         seeds = [b"agent_vault", agent.key().as_ref()],
@@ -231,7 +263,7 @@ pub struct RegisterAgent<'info> {
     /// Agent's token account for accumulated fees
     #[account(
         init,
-        payer = creator,
+        payer = payer,
         token::mint = token_mint,
         token::authority = agent,
         seeds = [b"agent_fees", agent.key().as_ref()],
@@ -240,14 +272,10 @@ pub struct RegisterAgent<'info> {
     pub agent_fees_vault: Box<Account<'info, TokenAccount>>,
 
     #[account(mut)]
-    pub creator: Signer<'info>,
+    pub payer: Signer<'info>,
 
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
-
-    /// CHECK: Instructions sysvar for Ed25519 signature verification
-    #[account(address = solana_program::sysvar::instructions::ID)]
-    pub instructions_sysvar: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
