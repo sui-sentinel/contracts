@@ -2,9 +2,10 @@
 node_modules/
 
 # Build artifacts
-target/
+target/debug
 dist/
-
+.fingerprint/
+deps
 # Anchor
 .anchor/
 

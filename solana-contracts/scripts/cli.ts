@@ -860,6 +860,181 @@ async function registerAgent(config: Config): Promise<void> {
   }
 }
 
+async function listAllAgents(config: Config): Promise<void> {
+  const program = getProgram(config);
+
+  console.log("\nFetching all agents...");
+  try {
+    const agents = await (program.account as any).agent.all();
+
+    if (agents.length === 0) {
+      console.log("No agents found.");
+      return;
+    }
+
+    console.log(`\nFound ${agents.length} agent(s):\n`);
+    console.log("========================================");
+
+    for (const agent of agents) {
+      const data = agent.account;
+      console.log(`\nAgent ID: ${data.agentId}`);
+      console.log(`  PDA: ${agent.publicKey.toBase58()}`);
+      console.log(`  Owner: ${data.owner.toBase58()}`);
+      console.log(`  Token Mint: ${data.tokenMint.toBase58()}`);
+      console.log(`  Cost per Message: ${data.costPerMessage.toString()}`);
+      console.log(`  Prompt Hash: ${Buffer.from(data.promptHash).toString("hex")}`);
+      console.log(`  Created At: ${new Date(data.createdAt.toNumber() * 1000).toISOString()}`);
+      console.log(`  Last Funded: ${data.lastFundedTimestamp.toNumber() > 0 ? new Date(data.lastFundedTimestamp.toNumber() * 1000).toISOString() : "Never"}`);
+      console.log(`  Attack Count: ${data.attackCount.toString()}`);
+      console.log(`  Is Defeated: ${data.isDefeated}`);
+      console.log("----------------------------------------");
+    }
+  } catch (e: any) {
+    console.error("Error:", e.message);
+  }
+}
+
+async function requestAttack(config: Config): Promise<void> {
+  const program = getProgram(config);
+  const programId = new PublicKey(config.programId);
+
+  // Get agent ID
+  const agentId = await question("Agent ID to attack: ");
+
+  // Derive agent PDA
+  const [agentPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("agent"), Buffer.from(agentId)],
+    programId
+  );
+
+  // Fetch agent data
+  let agentData;
+  try {
+    agentData = await (program.account as any).agent.fetch(agentPda);
+  } catch (e: any) {
+    console.error(`Error: Agent '${agentId}' not found`);
+    return;
+  }
+
+  // Fetch protocol config
+  const [protocolConfigPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("protocol_config")],
+    programId
+  );
+
+  let protocolConfig;
+  try {
+    protocolConfig = await (program.account as any).protocolConfig.fetch(protocolConfigPda);
+  } catch (e: any) {
+    console.error("Error: Could not fetch protocol config");
+    return;
+  }
+
+  // Calculate effective cost
+  const feeIncreaseBps = protocolConfig.feeIncreaseBps.toNumber();
+  const maxFeeMultiplierBps = protocolConfig.maxFeeMultiplierBps.toNumber();
+  const attackCount = agentData.attackCount.toNumber();
+  const baseCost = agentData.costPerMessage.toNumber();
+
+  const rawMultiplier = 10000 + (attackCount * feeIncreaseBps);
+  const multiplier = Math.min(rawMultiplier, maxFeeMultiplierBps);
+  const effectiveCost = Math.floor((baseCost * multiplier) / 10000);
+
+  console.log("\n========================================");
+  console.log("Attack Details");
+  console.log("========================================");
+  console.log(`Agent ID: ${agentId}`);
+  console.log(`Agent PDA: ${agentPda.toBase58()}`);
+  console.log(`Token Mint: ${agentData.tokenMint.toBase58()}`);
+  console.log(`Base Cost: ${baseCost}`);
+  console.log(`Attack Count: ${attackCount}`);
+  console.log(`Fee Multiplier: ${(multiplier / 100).toFixed(2)}%`);
+  console.log(`Effective Cost: ${effectiveCost}`);
+  console.log(`Is Defeated: ${agentData.isDefeated}`);
+
+  if (agentData.isDefeated) {
+    console.log("\nWarning: This agent is already defeated!");
+  }
+
+  // Ask for attacker's token account
+  const attackerTokenAccountInput = await question("\nYour Token Account Address: ");
+  const attackerTokenAccount = new PublicKey(attackerTokenAccountInput);
+
+  // Ask for protocol wallet token account
+  const protocolWalletTokenAccountInput = await question("Protocol Wallet Token Account Address: ");
+  const protocolWalletTokenAccount = new PublicKey(protocolWalletTokenAccountInput);
+
+  // Generate nonce (using timestamp + random)
+  const nonce = Date.now();
+
+  // Derive PDAs
+  const [agentVaultPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("agent_vault"), agentPda.toBuffer()],
+    programId
+  );
+
+  const [agentFeesVaultPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("agent_fees"), agentPda.toBuffer()],
+    programId
+  );
+
+  const [attackPda] = PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("attack"),
+      agentPda.toBuffer(),
+      config.keypair.publicKey.toBuffer(),
+      Buffer.from(new BigUint64Array([BigInt(nonce)]).buffer),
+    ],
+    programId
+  );
+
+  console.log("\nDerived Accounts:");
+  console.log(`Agent Vault: ${agentVaultPda.toBase58()}`);
+  console.log(`Agent Fees Vault: ${agentFeesVaultPda.toBase58()}`);
+  console.log(`Attack PDA: ${attackPda.toBase58()}`);
+  console.log(`Nonce: ${nonce}`);
+
+  const confirm = await question("\nProceed with attack? (yes/no): ");
+  if (confirm.toLowerCase() !== "yes") {
+    console.log("Cancelled.");
+    return;
+  }
+
+  console.log("\nRequesting attack...");
+  try {
+    const tx = await program.methods
+      .requestAttack(new BN(nonce))
+      .accounts({
+        protocolConfig: protocolConfigPda,
+        agent: agentPda,
+        agentVault: agentVaultPda,
+        agentFeesVault: agentFeesVaultPda,
+        attack: attackPda,
+        attackerTokenAccount: attackerTokenAccount,
+        protocolWallet: protocolConfig.protocolWallet,
+        protocolWalletTokenAccount: protocolWalletTokenAccount,
+        attacker: config.keypair.publicKey,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .rpc();
+
+    console.log(`\nTransaction: ${tx}`);
+    console.log("\n========================================");
+    console.log("Attack Requested Successfully!");
+    console.log("========================================");
+    console.log(`Attack PDA: ${attackPda.toBase58()}`);
+    console.log(`Nonce: ${nonce}`);
+    console.log(`Amount Paid: ${effectiveCost}`);
+    console.log("\nNote: The attack account is created. Wait for the TEE to process and call consume_prompt.");
+  } catch (e: any) {
+    console.error("Error:", e.message);
+    if (e.logs) {
+      console.error("\nTransaction logs:");
+      e.logs.forEach((log: string) => console.error(log));
+    }
+  }
+}
+
 // ============================================================================
 // Main Menu
 // ============================================================================
@@ -883,6 +1058,8 @@ const OPERATIONS = [
   { name: "View Protocol Config", fn: viewProtocolConfig, requiresProgramId: true },
   { name: "--- Agent Operations ---", fn: null, requiresProgramId: false },
   { name: "Register Agent", fn: registerAgent, requiresProgramId: true },
+  { name: "List All Agents", fn: listAllAgents, requiresProgramId: true },
+  { name: "Request Attack", fn: requestAttack, requiresProgramId: true },
   { name: "Exit", fn: null, requiresProgramId: false },
 ];
 
