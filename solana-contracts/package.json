@@ -6,7 +6,7 @@
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
     "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check",
     "test": "anchor test",
-    "cli": "bun run scripts/cli.ts"
+    "cli": "bun run scripts/cli/index.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.30.1",
