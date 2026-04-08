@@ -215,3 +215,9 @@ anchor deploy --provider.cluster devnet
 ## Reference
 
 **SOL Token Mint Address:** `So11111111111111111111111111111111111111112`
+
+
+Solana Explorer
+```
+https://solscan.io/tx/2xsanTPTuJNgnHLnqukTpMeWc4vKBWnrFgeSdEiZuRRGFouZqzYcfSPdiezYNxCuf8RhzEa7cU4WXqheDCAn6w36?cluster=devnet
+```

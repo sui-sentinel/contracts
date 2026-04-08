@@ -2,7 +2,7 @@
 node_modules/
 
 # Build artifacts
-target/debug
+target
 dist/
 .fingerprint/
 deps
