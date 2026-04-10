@@ -25,6 +25,13 @@ import {
   registerAgent,
   listAllAgents,
   requestAttack,
+  // Token operations
+  deriveTokenAccount,
+  createTokenAccount,
+  wrapSol,
+  unwrapSol,
+  showTokenBalances,
+  getProtocolWalletTokenAccount,
 } from "./operations";
 
 const OPERATIONS: Operation[] = [
@@ -48,6 +55,13 @@ const OPERATIONS: Operation[] = [
   { name: "Register Agent", fn: registerAgent, requiresProgramId: true },
   { name: "List All Agents", fn: listAllAgents, requiresProgramId: true },
   { name: "Request Attack", fn: requestAttack, requiresProgramId: true },
+  { name: "--- Token Operations ---", fn: null, requiresProgramId: false },
+  { name: "Derive Token Account Address", fn: deriveTokenAccount, requiresProgramId: true },
+  { name: "Create Token Account", fn: createTokenAccount, requiresProgramId: true },
+  { name: "Wrap SOL to wSOL", fn: wrapSol, requiresProgramId: true },
+  { name: "Unwrap wSOL to SOL", fn: unwrapSol, requiresProgramId: true },
+  { name: "Show Token Balances", fn: showTokenBalances, requiresProgramId: true },
+  { name: "Get Protocol Wallet Token Account", fn: getProtocolWalletTokenAccount, requiresProgramId: true },
   { name: "Exit", fn: null, requiresProgramId: false },
 ];
 

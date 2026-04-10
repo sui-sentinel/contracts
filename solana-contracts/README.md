@@ -86,12 +86,14 @@ anchor upgrade target/deploy/sui_sentinel.so --program-id <PROGRAM_ID>
 ```
 
 **When to use upgrade:**
+
 - Bug fixes
 - Adding new instructions
 - Non-breaking changes to existing functionality
 - You want existing PDAs and accounts to continue working
 
 **Important Notes:**
+
 - The upgrade authority must be the same wallet that originally deployed the program. Check with:
   ```bash
   solana program show <PROGRAM_ID>
@@ -126,6 +128,7 @@ anchor deploy
 ```
 
 **When to use fresh deployment:**
+
 - Breaking changes to account structures (adding/removing fields)
 - Complete protocol reset needed
 - Testing a new version alongside the old one
@@ -133,15 +136,16 @@ anchor deploy
 
 ### Quick Reference: Program IDs
 
-| Network   | Program ID |
-|-----------|------------|
-| Localnet  | `2pdFb495RGrbwiRJdin7aRmfsX4puTnoQGb7Rdd7sGDS` |
-| Devnet    | `B7jZYvzq9jdWw3ReWLs4d5SSoqYZ5yKnjAkzSpStAmZe` |
-| Mainnet   | `B7jZYvzq9jdWw3ReWLs4d5SSoqYZ5yKnjAkzSpStAmZe` |
+| Network  | Program ID                                     |
+| -------- | ---------------------------------------------- |
+| Localnet | `2pdFb495RGrbwiRJdin7aRmfsX4puTnoQGb7Rdd7sGDS` |
+| Devnet   | `B7jZYvzq9jdWw3ReWLs4d5SSoqYZ5yKnjAkzSpStAmZe` |
+| Mainnet  | `B7jZYvzq9jdWw3ReWLs4d5SSoqYZ5yKnjAkzSpStAmZe` |
 
 ### Sync Program ID Helper
 
 If you need to sync `declare_id!` with `Anchor.toml`:
+
 ```bash
 # Extract program ID from keypair and update source files
 anchor keys sync
@@ -174,17 +178,22 @@ bun run scripts/cli.ts <command>
 ## Common Issues
 
 ### "Program account already exists"
+
 This means the program ID already has a deployed program. Either:
+
 - Use `anchor upgrade` to update the existing program
 - Generate a new keypair for a fresh deployment
 
 ### "Incorrect program id for instruction"
+
 The `declare_id!` in your code doesn't match the actual deployed program ID. Ensure:
+
 1. `lib.rs` has the correct `declare_id!`
 2. `Anchor.toml` has matching program IDs
 3. Run `anchor build` after any ID changes
 
 ### "Invalid program authority"
+
 You're trying to upgrade a program with a different wallet than the original deployer. Use the original upgrade authority wallet.
 
 ---
@@ -206,6 +215,7 @@ sui_sentinel = "PROGRAM_ID"    # Devnet program ID
 ```
 
 Switch clusters by changing the `cluster` value or using:
+
 ```bash
 anchor deploy --provider.cluster devnet
 ```
@@ -216,8 +226,15 @@ anchor deploy --provider.cluster devnet
 
 **SOL Token Mint Address:** `So11111111111111111111111111111111111111112`
 
-
 Solana Explorer
+
 ```
 https://solscan.io/tx/2xsanTPTuJNgnHLnqukTpMeWc4vKBWnrFgeSdEiZuRRGFouZqzYcfSPdiezYNxCuf8RhzEa7cU4WXqheDCAn6w36?cluster=devnet
 ```
+
+```
+Attack PDA: Eraf1s7TPatwmDMvoy7UfHoPtxmRZRPfFSRPczF6T25c
+Nonce: 1775804398440
+Amount Paid: 1234
+```
+

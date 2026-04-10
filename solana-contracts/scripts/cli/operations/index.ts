@@ -28,3 +28,13 @@ export {
   listAllAgents,
   requestAttack,
 } from "./agent";
+
+// Token operations
+export {
+  deriveTokenAccount,
+  createTokenAccount,
+  wrapSol,
+  unwrapSol,
+  showTokenBalances,
+  getProtocolWalletTokenAccount,
+} from "./token";
