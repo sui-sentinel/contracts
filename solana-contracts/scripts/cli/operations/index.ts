@@ -27,6 +27,7 @@ export {
   registerAgent,
   listAllAgents,
   requestAttack,
+  consumePrompt,
 } from "./agent";
 
 // Token operations

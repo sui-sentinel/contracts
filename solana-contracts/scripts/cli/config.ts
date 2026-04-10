@@ -14,6 +14,12 @@ export const TEE_ENDPOINTS: Record<NetworkType, string> = {
   mainnet: "https://tee-solana.suisentinel.xyz/mainnet/register-agent",
 };
 
+export const TEE_CONSUME_PROMPT_ENDPOINTS: Record<NetworkType, string> = {
+  devnet: "https://tee-solana.suisentinel.xyz/devnet/consume-prompt",
+  testnet: "https://tee-solana.suisentinel.xyz/testnet/consume-prompt",
+  mainnet: "https://tee-solana.suisentinel.xyz/mainnet/consume-prompt",
+};
+
 export function getProgramIdEnvKey(network: NetworkType): string {
   return `${network.toUpperCase()}_PROGRAM_ID`;
 }

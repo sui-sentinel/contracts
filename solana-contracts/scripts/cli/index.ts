@@ -25,6 +25,7 @@ import {
   registerAgent,
   listAllAgents,
   requestAttack,
+  consumePrompt,
   // Token operations
   deriveTokenAccount,
   createTokenAccount,
@@ -55,6 +56,7 @@ const OPERATIONS: Operation[] = [
   { name: "Register Agent", fn: registerAgent, requiresProgramId: true },
   { name: "List All Agents", fn: listAllAgents, requiresProgramId: true },
   { name: "Request Attack", fn: requestAttack, requiresProgramId: true },
+  { name: "Consume Prompt", fn: consumePrompt, requiresProgramId: true },
   { name: "--- Token Operations ---", fn: null, requiresProgramId: false },
   { name: "Derive Token Account Address", fn: deriveTokenAccount, requiresProgramId: true },
   { name: "Create Token Account", fn: createTokenAccount, requiresProgramId: true },

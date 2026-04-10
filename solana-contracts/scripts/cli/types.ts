@@ -35,6 +35,28 @@ export interface RegisterAgentResponse {
   signature: string;
 }
 
+export interface ConsumePromptRequest {
+  agent_id: string;
+  message: string;
+  attack_account_pubkey: string;
+}
+
+export interface ConsumePromptResponse {
+  response: {
+    intent: number;
+    timestamp: number;
+    data: {
+      agent_id: string;
+      success: boolean;
+      score: number;
+      attacker: number[];
+      nonce: number;
+      message_hash: number[];
+    };
+  };
+  signature: string;
+}
+
 export interface Operation {
   name: string;
   fn: ((config: Config) => Promise<void>) | null;
