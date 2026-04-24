@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
 
-declare_id!("761bJeLrxbVJmq3GU6yoJXc8N5rjFqbvRUL53b5dVczj");
+declare_id!("Di4JaK3QBbA869f6UNGYMef5RFcxxXyxTMiBymnMb5Gz");
 
 pub mod errors;
 pub mod events;

@@ -173,6 +173,7 @@ pub fn consume_prompt(
     )?;
 
     emit!(PromptConsumed {
+        attack: ctx.accounts.attack.key(),
         agent: agent_key,
         agent_id: agent_id.clone(),
         attacker: attacker_key,

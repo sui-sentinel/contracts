@@ -138,6 +138,7 @@ pub struct FeeTransferred {
 
 #[event]
 pub struct PromptConsumed {
+    pub attack: Pubkey,
     pub agent: Pubkey,
     pub agent_id: String,
     pub attacker: Pubkey,
