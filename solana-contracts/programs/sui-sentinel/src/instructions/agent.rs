@@ -88,6 +88,7 @@ pub fn register_agent(
 }
 
 /// Initialize agent vault accounts (must be called after register_agent)
+#[inline(never)]
 pub fn init_agent_vaults(ctx: Context<InitAgentVaults>) -> Result<()> {
     // Validate token mint matches agent's token mint
     require!(

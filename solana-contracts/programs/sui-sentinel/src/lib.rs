@@ -231,7 +231,7 @@ pub struct RegisterAgent<'info> {
     pub system_program: Program<'info, System>,
 
     /// CHECK: Instructions sysvar for Ed25519 signature verification
-    #[account(address = solana_program::sysvar::instructions::ID)]
+    #[account(address = anchor_lang::solana_program::sysvar::instructions::ID)]
     pub instructions_sysvar: AccountInfo<'info>,
 }
 
@@ -494,6 +494,6 @@ pub struct ConsumePrompt<'info> {
     pub token_program: Program<'info, Token>,
 
     /// CHECK: Instructions sysvar for Ed25519 signature verification
-    #[account(address = solana_program::sysvar::instructions::ID)]
+    #[account(address = anchor_lang::solana_program::sysvar::instructions::ID)]
     pub instructions_sysvar: AccountInfo<'info>,
 }

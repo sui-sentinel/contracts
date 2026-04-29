@@ -1,8 +1,8 @@
 use crate::errors::SentinelError;
 use crate::SIGNATURE_MAX_AGE;
 use anchor_lang::prelude::*;
-use solana_program::ed25519_program;
-use solana_program::sysvar::instructions::{
+use anchor_lang::solana_program::ed25519_program;
+use anchor_lang::solana_program::sysvar::instructions::{
     load_current_index_checked, load_instruction_at_checked,
 };
 
