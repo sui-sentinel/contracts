@@ -39,6 +39,9 @@ pub fn request_attack(ctx: Context<RequestAttack>, nonce: u64) -> Result<()> {
         .unwrap_or(cost_per_message);
 
     // Calculate fee distribution
+    // Note: Integer division may cause minor rounding (dust amounts < 1 token).
+    // Any rounding remainder is allocated to agent_balance_amount, which goes
+    // to the agent vault (reward pool). This is intentional and acceptable.
     let creator_fee_amount = effective_cost
         .checked_mul(config.creator_fee)
         .ok_or(SentinelError::ArithmeticOverflow)?
@@ -51,6 +54,7 @@ pub fn request_attack(ctx: Context<RequestAttack>, nonce: u64) -> Result<()> {
         .checked_div(BASIS_POINTS)
         .ok_or(SentinelError::ArithmeticOverflow)?;
 
+    // Remainder after creator and protocol fees goes to agent vault
     let agent_balance_amount = effective_cost
         .checked_sub(creator_fee_amount)
         .ok_or(SentinelError::ArithmeticOverflow)?

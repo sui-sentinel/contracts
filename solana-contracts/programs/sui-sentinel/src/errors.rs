@@ -70,4 +70,7 @@ pub enum SentinelError {
 
     #[msg("Token mint does not match agent's token mint")]
     InvalidTokenMint,
+
+    #[msg("Amount must be greater than zero")]
+    InvalidAmount,
 }

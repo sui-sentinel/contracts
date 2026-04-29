@@ -106,6 +106,9 @@ pub fn init_agent_vaults(ctx: Context<InitAgentVaults>) -> Result<()> {
 
 /// Fund an agent's reward pool
 pub fn fund_agent(ctx: Context<FundAgent>, amount: u64) -> Result<()> {
+    // Validate amount is greater than zero
+    require!(amount > 0, SentinelError::InvalidAmount);
+
     let clock = Clock::get()?;
 
     // Capture keys before mutable borrow
@@ -241,6 +244,9 @@ pub fn claim_fees(ctx: Context<ClaimFees>) -> Result<()> {
 
 /// Withdraw from agent balance (after lock period)
 pub fn withdraw_from_agent(ctx: Context<WithdrawFromAgent>, amount: u64) -> Result<()> {
+    // Validate amount is greater than zero
+    require!(amount > 0, SentinelError::InvalidAmount);
+
     let clock = Clock::get()?;
     let agent = &ctx.accounts.agent;
 
